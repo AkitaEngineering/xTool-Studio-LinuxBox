@@ -91,9 +91,15 @@ grep -Fq "Would delete $HOME/.local/share/xtool-studio" "$scratch/output"
 
 XTOOL_TEST_OS=FreeBSD ./install.sh --dry-run --yes --gpu 4 > "$scratch/output"
 grep -Fq 'would install Wine with pkg' "$scratch/output"
-! grep -Fq 'Container image' "$scratch/output"
+if grep -Fq 'Container image' "$scratch/output"; then
+    echo 'The FreeBSD installer unexpectedly offered a container image.' >&2
+    exit 1
+fi
 XTOOL_TEST_OS=FreeBSD ./uninstall.sh --dry-run --yes > "$scratch/output"
-! grep -Fq 'Distrobox' "$scratch/output"
+if grep -Fq 'Distrobox' "$scratch/output"; then
+    echo 'The FreeBSD uninstaller unexpectedly mentioned Distrobox.' >&2
+    exit 1
+fi
 
 if command -v fish >/dev/null; then
     export XDG_CACHE_HOME="$scratch/fish-cache"
