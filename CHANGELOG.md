@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0 · 2026-11-22
+
+- Scripts and configuration are licensed under GPL-3.0-only. Installer behavior is unchanged. The v1.0.0 tag remains under the MIT license. Upstream portions from Sascha Schüller keep the MIT notice in `LICENSES/MIT.txt`.
+
 ## 1.0.0 · 2026-11-22
 
 First official Akita Engineering release. The project is now **xTool Studio LinuxBox**, formerly **xTool Studio Cachy Box**.

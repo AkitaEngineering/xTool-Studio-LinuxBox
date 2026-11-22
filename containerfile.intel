@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Akita Engineering
+# SPDX-License-Identifier: GPL-3.0-only
+# Portions copyright (c) 2026 Sascha Schüller, MIT. See LICENSES/MIT.txt.
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y \

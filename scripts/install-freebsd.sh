@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Akita Engineering
+# SPDX-License-Identifier: GPL-3.0-only
+# Portions copyright (c) 2026 Sascha Schüller, MIT. See LICENSES/MIT.txt.
 set -euo pipefail
 
 SETUP_DIR="${XTOOL_SETUP_DIR:-$HOME/.cache/xtool-studio-cachy-box}"

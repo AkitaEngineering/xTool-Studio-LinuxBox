@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Akita Engineering
+# SPDX-License-Identifier: GPL-3.0-only
 """Map xTool Studio first-run windows on X11/XWayland if the compositor hides them.
 
 xTool 1.9.11 country/privacy/plan dialogs are patched to show:true with a normal

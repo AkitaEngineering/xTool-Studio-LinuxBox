@@ -17,7 +17,7 @@ Allow several GiB of free space for the container, Windows installer, and extrac
 
 ## Install and launch
 
-1. Download and extract **Source code (tar.gz)** from the [release page](https://github.com/AkitaEngineering/xTool-Studio-LinuxBox/releases/latest). If you use Git, clone the release with `git clone --branch v1.0.0 https://github.com/AkitaEngineering/xTool-Studio-LinuxBox.git`.
+1. Download and extract **Source code (tar.gz)** from the [release page](https://github.com/AkitaEngineering/xTool-Studio-LinuxBox/releases/latest). If you use Git, clone the release with `git clone --branch v1.1.0 https://github.com/AkitaEngineering/xTool-Studio-LinuxBox.git`.
 2. From a terminal in the extracted or cloned folder, run the following as your regular user.
 
    ```sh
@@ -78,4 +78,4 @@ USB, network discovery, and cameras depend on your xTool model and host configur
 
 LinuxBox stays free. If it saves you a setup, you can sponsor [Akita Engineering](https://github.com/sponsors/AkitaEngineering). The Sponsor button on this repository takes one-time and monthly payments through GitHub Sponsors. That money goes toward testing and keeping the installer working as xTool Studio and Wine change.
 
-LinuxBox's scripts and configuration are MIT-licensed. The Windows installer is downloaded from xTool and is governed by xTool's terms. [License](LICENSE.md) · [Attribution](docs/attribution.md) · [Shouts out](Shouts_Out.md)
+LinuxBox's scripts and configuration are licensed under the GNU General Public License version 3. The Windows installer is downloaded from xTool and is governed by xTool's terms. [License](LICENSE) · [Attribution](docs/attribution.md) · [Shouts out](Shouts_Out.md)

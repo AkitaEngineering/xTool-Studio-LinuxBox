@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Akita Engineering
+# SPDX-License-Identifier: GPL-3.0-only
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

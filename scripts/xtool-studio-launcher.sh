@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright (c) 2026 Akita Engineering
+# SPDX-License-Identifier: GPL-3.0-only
+# Portions copyright (c) 2026 Sascha Schüller, MIT. See LICENSES/MIT.txt.
 set -eu
 
 APP_HOME="$HOME/.local/share/xtool-studio"
