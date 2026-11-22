@@ -74,4 +74,4 @@ Run `./uninstall.sh` or `./uninstall.fish` to remove the launcher and setup file
 
 USB, network discovery, and cameras depend on your xTool model and host configuration. See the [troubleshooting guide](docs/troubleshooting.md) for first-run display issues, device connectivity, logs, and bug reports. The separate [legacy Compose workflow](docs/compose.md) has its own limitations.
 
-LinuxBox's scripts and configuration are MIT-licensed. The Windows installer is downloaded from xTool and is governed by xTool's terms. [License](LICENSE.md) · [Attribution](docs/attribution.md)
+LinuxBox's scripts and configuration are MIT-licensed. The Windows installer is downloaded from xTool and is governed by xTool's terms. [License](LICENSE.md) · [Attribution](docs/attribution.md) · [Shouts out](Shouts_Out.md)
