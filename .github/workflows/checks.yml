@@ -1,0 +1,35 @@
+name: Release checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install Fish
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fish
+      - name: Check syntax
+        run: |
+          for script in install.sh uninstall.sh scripts/*.sh tests/*.sh; do
+            bash -n "$script"
+          done
+          sh -n scripts/xtool-studio-launcher.sh
+          fish --no-execute install.fish
+          fish --no-execute uninstall.fish
+          python3 -c 'import ast, pathlib; ast.parse(pathlib.Path("scripts/xtool-map-windows.py").read_text())'
+      - name: Run installer and uninstaller previews
+        run: bash tests/cli-smoke.sh
+      - name: Validate legacy Compose configuration
+        env:
+          DISPLAY: ':0'
+          WAYLAND_DISPLAY: wayland-0
+          XDG_RUNTIME_DIR: /tmp
+        run: docker compose config --quiet

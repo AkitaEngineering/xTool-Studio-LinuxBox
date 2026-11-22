@@ -1,10 +1,10 @@
-#!/usr/bin/fish
+#!/usr/bin/env fish
 
 set script_dir (dirname (status filename))
 set bash_script "$script_dir/uninstall.sh"
 
 if not type -q bash
-    echo "ERROR: bash is required to uninstall xTool Studio Cachy Box."
+    echo "ERROR: bash is required to uninstall xTool Studio LinuxBox."
     exit 1
 end
 

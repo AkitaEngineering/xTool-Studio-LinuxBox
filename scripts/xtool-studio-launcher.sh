@@ -25,6 +25,11 @@ fi
 
 printf '\n[%s] Starting xTool Studio\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
+if ! command -v wine >/dev/null 2>&1; then
+	echo 'Wine is missing. Run ./install.sh from the xTool Studio LinuxBox release to repair the setup.' >&2
+	exit 1
+fi
+
 # Distrobox enter forwards the host environment. Host Electron/VS Code
 # sets ELECTRON_RUN_AS_NODE=1, which makes xTool Studio (Electron) treat
 # itself as Node, eval stdin, and exit. CI=true also changes startup.
@@ -169,6 +174,10 @@ fi
 
 APP_EXE="$(find_installed_exe)"
 if [ -z "$APP_EXE" ]; then
+	if [ ! -s "$INSTALLER_PATH" ]; then
+		echo 'The xTool Studio Windows installer is missing. Run ./install.sh to download it again.' >&2
+		exit 1
+	fi
 	if is_installer_running; then
 		echo "xTool Studio installer is already running. Complete it or close it before retrying." >&2
 		exit 2
@@ -196,8 +205,8 @@ if [ -f "$APP_ASAR" ] && grep -F -- 'createCountrySelectWindow' "$APP_ASAR" >/de
 	# Glob: wine- + one digit + literal '.'  (wine-9.0 matches, wine-11.0 does not)
 	case "$wine_ver" in
 		wine-[0-9].*|wine-9.*)
-			echo 'ERROR: Wine 9 native-crashes when xTool Studio 1.9.11 shows the country window.'
-			echo 'Rerun ./install.sh so the container can install WineHQ 11. launch.log must show Wine: wine-11.'
+			echo 'xTool Studio 1.9.11 cannot open the country selection window with Wine 9.'
+			echo 'Run ./install.sh to update Wine. Check the Wine version in launch.log afterward.'
 			exit 3
 			;;
 	esac

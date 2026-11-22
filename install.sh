@@ -1,22 +1,22 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # --- Configuration & Colors ---
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "${BLUE}--------------------------------------------------------${NC}"
-echo -e "xTool Studio Cachy Box Installer (Universal Bash)"
-echo -e "${BLUE}--------------------------------------------------------${NC}"
+BLUE=''
+GREEN=''
+YELLOW=''
+NC=''
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    BLUE='\033[0;34m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+fi
 
 # --- CLI options & Logging ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_OS="$(uname -s)"
 LOG_DIR="$HOME/.cache/xtool-studio-cachy-box"
 SETUP_DIR="$LOG_DIR"
-mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/install.log"
 LAST_STEP_FILE="$LOG_DIR/last_failed_step"
 CONTAINER_SETUP_SRC="$SCRIPT_DIR/scripts/container-setup.sh"
@@ -26,9 +26,14 @@ LAUNCHER_SRC="$SCRIPT_DIR/scripts/xtool-studio-launcher.sh"
 MAPPER_SRC="$SCRIPT_DIR/scripts/xtool-map-windows.py"
 
 log(){
-    local level="$1"; shift
-    local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    echo -e "[$ts] [$level] $*" | tee -a "$LOG_FILE"
+    local level="$1" timestamp
+    shift
+    if [ "$DRY_RUN" = true ] || [ "$PRECHECK" = true ]; then
+        printf '[%s] %s\n' "$level" "$*"
+    else
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        printf '[%s] [%s] %s\n' "$timestamp" "$level" "$*" | tee -a "$LOG_FILE"
+    fi
 }
 
 has_nvidia_cdi_spec(){
@@ -67,10 +72,15 @@ resolve_latest_xtool_url(){
         return 0
     fi
 
-    latest_response=$(curl --fail -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 \
+    if [ "$DRY_RUN" = true ]; then
+        log "INFO" "DRY RUN: would look up the Windows installer at $XTOOL_RELEASE_NOTES_URL"
+        return 0
+    fi
+
+    latest_response=$(curl -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 \
         "$XTOOL_RELEASE_NOTES_URL" 2>>"$LOG_FILE" || true)
 
-    latest_url=$(printf '%s' "$latest_response" | grep -oE 'https://storage[^"[:space:]]+/xTool-Studio-x64-[^"[:space:]]+\.exe' | head -n 1)
+    latest_url=$(printf '%s' "$latest_response" | grep -oE 'https://storage\.atomm\.com/[^"[:space:]<>]+/xTool-Studio-x64-[0-9.]+\.exe' | head -n 1)
 
     if [ -n "$latest_url" ]; then
         XTOOL_URL="$latest_url"
@@ -105,21 +115,49 @@ if [ -n "$XTOOL_URL" ]; then
     XTOOL_URL_SOURCE="environment"
 fi
 
-# Prevent running as root: distrobox commands do not behave correctly under sudo
-if [ "$(id -u)" -eq 0 ]; then
-    echo "ERROR: Do not run this installer with sudo or as root."
-    echo "Please run as your regular user (no sudo): ./install.sh"
-    echo "If you intentionally need root distrobox operations, re-run without this script or use distrobox --root commands as documented."
-    exit 1
-fi
-
 NON_INTERACTIVE=false
 DRY_RUN=false
 PRECHECK=false
 UNINSTALL=false
 CONTAINER_NAME="xtool-studio"
+gpu_choice=""
+img_choice=""
+
+usage(){
+    cat <<EOF
+xTool Studio LinuxBox installer · Akita Engineering
+https://www.akitaengineering.com
+
+Usage
+  $0 [options]
+
+Options
+  --check                  Check host prerequisites.
+  --dry-run                Preview the setup without writing files or downloading.
+  --non-interactive, --yes, -y
+                           Use defaults for prompts in this script.
+  --gpu 1-4                1 Nvidia, 2 AMD, 3 Intel, 4 software rendering.
+  --image-source 1-2       Linux only. 1 stock Ubuntu, 2 local image build.
+  --container-name NAME    Linux only. Default is xtool-studio.
+  --url URL                Override the xTool Studio Windows installer URL.
+  --log-file PATH          Write the log to PATH during installation.
+  --uninstall              Run the uninstaller. Add --dry-run for a preview.
+  --help, -h               Show this help.
+
+Linux uses Distrobox and Podman. FreeBSD installs Wine through pkg.
+EOF
+}
+
+usage_error(){
+    printf 'ERROR: %s\nRun %s --help for usage.\n' "$1" "$0" >&2
+    exit 2
+}
 
 while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --url|--container-name|--gpu|--image-source|--log-file)
+            [[ -n "${2:-}" && "$2" != -* ]] || usage_error "$1 requires a value." ;;
+    esac
     case "$1" in
         --non-interactive|--yes|-y)
             NON_INTERACTIVE=true; shift ;;
@@ -140,69 +178,52 @@ while [[ "$#" -gt 0 ]]; do
         --log-file)
             LOG_FILE="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: $0 [--non-interactive|--yes|-y] [--dry-run] [--check] [--uninstall] [--url URL] [--container-name NAME] [--gpu 1-4] [--image-source 1-2] [--log-file PATH]"
-            echo "On FreeBSD, Distrobox is skipped and native Wine is installed with pkg."
-            exit 0 ;;
-        *) shift ;;
+            usage; exit 0 ;;
+        *) usage_error "Unknown option '$1'." ;;
     esac
 done
 
-# if uninstall flag passed, delegate to uninstaller script in same directory
+[[ "$CONTAINER_NAME" =~ ^[[:alnum:]][[:alnum:]_.-]*$ ]] || usage_error "Invalid container name '$CONTAINER_NAME'."
+[[ -z "$gpu_choice" || "$gpu_choice" =~ ^[1-4]$ ]] || usage_error "--gpu needs a number from 1 to 4."
+[[ -z "$img_choice" || "$img_choice" =~ ^[1-2]$ ]] || usage_error "--image-source needs 1 or 2."
+
 if [ "$UNINSTALL" = true ]; then
-    log "INFO" "Switching to uninstaller mode"
-    exec bash "$(dirname "$0")/uninstall.sh" --container-name "$CONTAINER_NAME" $( [ "$NON_INTERACTIVE" = true ] && echo --yes ) $( [ "$DRY_RUN" = true ] && echo --dry-run )
+    uninstall_args=(--container-name "$CONTAINER_NAME")
+    [ "$LOG_FILE" = "$LOG_DIR/install.log" ] || uninstall_args+=(--log-file "$LOG_FILE")
+    [ "$NON_INTERACTIVE" = false ] || uninstall_args+=(--yes)
+    [ "$DRY_RUN" = false ] || uninstall_args+=(--dry-run)
+    exec bash "$SCRIPT_DIR/uninstall.sh" "${uninstall_args[@]}"
 fi
 
+if [ "$(id -u)" -eq 0 ] && [ "$DRY_RUN" = false ] && [ "$PRECHECK" = false ]; then
+    echo 'Run ./install.sh as your regular user. The installer will ask for elevated privileges only when needed.' >&2
+    exit 1
+fi
+
+echo "xTool Studio LinuxBox installer · Akita Engineering"
 LAST_STEP="init"
 
 fail(){
     local msg="$1"; shift
     echo
     log "ERROR" "$msg"
-    echo "$LAST_STEP" > "$LAST_STEP_FILE" || true
+    if [ "$DRY_RUN" = false ] && [ "$PRECHECK" = false ]; then
+        printf '%s\n' "$LAST_STEP" > "$LAST_STEP_FILE"
+    fi
     exit 1
 }
 
-trap 'rc=$?; if [ $rc -ne 0 ]; then log "ERROR" "Installer exited with code $rc (last step: $LAST_STEP)"; fi' EXIT
+if [ "$DRY_RUN" = false ] && [ "$PRECHECK" = false ]; then
+    mkdir -p "$LOG_DIR" && touch "$LOG_FILE" || {
+        printf 'Cannot open %s. Check that its directory exists and is writable.\n' "$LOG_FILE" >&2
+        exit 1
+    }
+fi
 
 case "$HOST_OS" in
     Linux|FreeBSD) ;;
     *) fail "Unsupported host OS: $HOST_OS. Linux (Distrobox + Wine) and FreeBSD (native Wine) are supported." ;;
 esac
-
-# Helpers: download with retries and run commands (logs + dry-run)
-download_with_retries(){
-    local url="$1" dest="$2"
-    local tries=0 max=5
-    while [ $tries -lt $max ]; do
-        tries=$((tries+1))
-        if [ "$DRY_RUN" = true ]; then
-            log "INFO" "DRY RUN: would download $url to $dest (attempt $tries)"
-            return 0
-        fi
-        log "INFO" "Downloading $url (attempt $tries/$max)"
-        curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$url" -o "$dest" 2>&1 | tee -a "$LOG_FILE"
-        if [ ${PIPESTATUS[0]:-0} -eq 0 ]; then
-            return 0
-        fi
-        sleep $((tries * 2))
-    done
-    return 1
-}
-
-# spinner for background operations
-spinner(){
-    local pid=$1
-    local delay=0.1
-    local spinstr='|/-\\'
-    while ps -p $pid > /dev/null 2>&1; do
-        local temp=${spinstr#?}
-        printf " [%c]  " "$spinstr"
-        spinstr=$temp${spinstr%$temp}
-        sleep $delay
-        printf "\b\b\b\b\b\b"
-    done
-}
 
 detect_gpu(){
     detected_gpu="none"
@@ -230,57 +251,44 @@ detect_gpu(){
 # preflight checks
 preflight(){
     log "INFO" "Running preflight checks on $HOST_OS"
-    local cmds
+    local cmd available
+    local cmds missing=()
     if [ "$HOST_OS" = "FreeBSD" ]; then
         cmds=(curl pkg)
     else
-        cmds=(distrobox podman curl lspci)
+        cmds=(distrobox podman curl)
     fi
     for cmd in "${cmds[@]}"; do
-        if ! command -v "$cmd" &>/dev/null; then
-            log "WARN" "Command $cmd not found. Installer may attempt to install it or fail."
-            case $cmd in
-                distrobox|podman)
-                    echo "Install via your package manager (apt/pacman/dnf) or see https://github.com/89luca89/distrobox"
-                    ;;
-                curl)
-                    echo "Install curl (pkg install curl, or apt install curl)"
-                    ;;
-                pkg)
-                    echo "FreeBSD pkg is required to install Wine."
-                    ;;
-                lspci)
-                    echo "Install pciutils (apt install pciutils)"
-                    ;;
-            esac
-        fi
+        command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
-    # network check
-    if ! ping -c 1 github.com &>/dev/null; then
-        log "WARN" "Network appears unreachable; downloads will fail."
-        echo "WARNING: network check failed"
+    if [ "${#missing[@]}" -gt 0 ]; then
+        log "ERROR" "Install these prerequisites with your host package manager, then run --check again: ${missing[*]}"
+        return 1
+    fi
+    if [ "$HOST_OS" = "FreeBSD" ]; then
+        if ! command -v doas &>/dev/null && ! command -v sudo &>/dev/null; then
+            log "ERROR" "Configure doas or sudo so the installer can use pkg."
+            return 1
+        fi
+    elif ! podman info >/dev/null 2>&1; then
+        log "ERROR" "Podman is unable to start. Run 'podman info' in your terminal for details."
+        return 1
     fi
     if [ "$HOST_OS" != "FreeBSD" ] && command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null && ! has_nvidia_container_support; then
         log "WARN" "Nvidia GPU detected but Podman CDI support is not configured. Install nvidia-container-toolkit and generate a CDI spec before using the Nvidia path."
-        echo "WARNING: Nvidia container support is not configured for Podman."
-        echo "Install nvidia-container-toolkit and generate /etc/cdi/nvidia.yaml, or use Generic rendering."
     fi
     # disk space (POSIX df -kP: avail is column 4)
-    avail=$(df -kP . | awk 'NR==2 {print $4}')
-    if [ -n "$avail" ] && [ "$avail" -lt 1048576 ]; then
-        log "WARN" "Less than 1GB free; installation may fail."
+    available=$(df -kP "$HOME" | awk 'NR==2 {print $4}')
+    if [ -n "$available" ] && [ "$available" -lt 4194304 ]; then
+        log "WARN" "Your home filesystem has less than 4 GiB free for the download and extracted files."
     fi
-    echo "preflight complete"
+    log "INFO" "Host prerequisite check passed."
 }
 
 
 # Distrobox 1.7 (Ubuntu/Zorin) eval's the enter command with /bin/sh (dash).
 # Never pass multiline scripts or paths with parentheses through this helper.
 enter_container(){
-    if [ "$DRY_RUN" = true ]; then
-        log "INFO" "DRY RUN: would run in container: distrobox enter --no-workdir $CONTAINER_NAME -- $*"
-        return 0
-    fi
     distrobox enter --no-workdir "$CONTAINER_NAME" -- "$@" 2>&1 | tee -a "$LOG_FILE"
     return ${PIPESTATUS[0]:-0}
 }
@@ -289,6 +297,14 @@ verify_container_setup(){
     enter_container /usr/bin/test -x /usr/local/bin/xToolStudio || return 1
     enter_container /usr/bin/test -f /usr/share/applications/xToolStudio.desktop || return 1
     log "INFO" "Verified launcher and desktop entry inside container $CONTAINER_NAME"
+}
+
+container_exists(){
+    distrobox list --no-color | awk -F '|' -v name="$CONTAINER_NAME" '
+        { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2) }
+        $2 == name { found = 1 }
+        END { exit !found }
+    '
 }
 
 write_setup_env(){
@@ -303,31 +319,13 @@ write_setup_env(){
     } > "$SETUP_DIR/container-setup.env"
 }
 
-prepare_container_setup(){
-    if [ ! -f "$CONTAINER_SETUP_SRC" ] || [ ! -f "$LAUNCHER_SRC" ] || [ ! -f "$PAYLOAD_SRC" ] || [ ! -f "$MAPPER_SRC" ]; then
-        fail "Missing installer scripts in $SCRIPT_DIR/scripts. Re-clone the repository and retry."
+prepare_setup(){
+    local setup_script="$1"
+    if [ ! -f "$setup_script" ] || [ ! -f "$LAUNCHER_SRC" ] || [ ! -f "$PAYLOAD_SRC" ] || [ ! -f "$MAPPER_SRC" ]; then
+        fail "Setup files are missing. Download and extract a fresh copy of the release."
     fi
 
-    mkdir -p "$SETUP_DIR"
-    cp -f "$CONTAINER_SETUP_SRC" "$SETUP_DIR/container-setup.sh"
-    cp -f "$LAUNCHER_SRC" "$SETUP_DIR/xtool-studio-launcher.sh"
-    cp -f "$PAYLOAD_SRC" "$SETUP_DIR/install-payload.sh"
-    cp -f "$MAPPER_SRC" "$SETUP_DIR/xtool-map-windows.py"
-    chmod 0755 "$SETUP_DIR/container-setup.sh" "$SETUP_DIR/xtool-studio-launcher.sh" "$SETUP_DIR/install-payload.sh" "$SETUP_DIR/xtool-map-windows.py"
-    write_setup_env
-}
-
-prepare_freebsd_setup(){
-    if [ ! -f "$FREEBSD_SETUP_SRC" ] || [ ! -f "$LAUNCHER_SRC" ] || [ ! -f "$PAYLOAD_SRC" ] || [ ! -f "$MAPPER_SRC" ]; then
-        fail "Missing FreeBSD installer scripts in $SCRIPT_DIR/scripts. Re-clone the repository and retry."
-    fi
-
-    mkdir -p "$SETUP_DIR"
-    cp -f "$FREEBSD_SETUP_SRC" "$SETUP_DIR/install-freebsd.sh"
-    cp -f "$LAUNCHER_SRC" "$SETUP_DIR/xtool-studio-launcher.sh"
-    cp -f "$PAYLOAD_SRC" "$SETUP_DIR/install-payload.sh"
-    cp -f "$MAPPER_SRC" "$SETUP_DIR/xtool-map-windows.py"
-    chmod 0755 "$SETUP_DIR/install-freebsd.sh" "$SETUP_DIR/xtool-studio-launcher.sh" "$SETUP_DIR/install-payload.sh" "$SETUP_DIR/xtool-map-windows.py"
+    cp -f "$setup_script" "$LAUNCHER_SRC" "$PAYLOAD_SRC" "$MAPPER_SRC" "$SETUP_DIR/" &&
     write_setup_env
 }
 
@@ -338,7 +336,11 @@ prepare_freebsd_setup(){
 # if --check was given, run preflight and exit
 if [ "$PRECHECK" = true ]; then
     preflight
-    exit 0
+    exit $?
+fi
+
+if [ "$DRY_RUN" = false ] && ! command -v curl &>/dev/null; then
+    fail "Install curl with your host package manager, then run the installer again."
 fi
 
 resolve_latest_xtool_url
@@ -347,12 +349,7 @@ resolve_latest_xtool_url
 # --- GPU Selection ---
 # detect hardware and ask the user to choose a driver stack
 
-echo -e "\n${YELLOW}--- GPU Selection ---${NC}"
-
-# allow overriding via CLI
-if [ -n "$gpu_choice" ]; then
-    log "INFO" "Using GPU selection from CLI: $gpu_choice"
-fi
+echo -e "\n${YELLOW}--- Graphics ---${NC}"
 detect_gpu
 
 echo -e "Detected Hardware: ${GREEN}$detected_gpu${NC}"
@@ -381,9 +378,10 @@ elif [ "$NON_INTERACTIVE" = true ]; then
     gpu_choice=$gpu_default
     log "INFO" "Non-interactive: selecting GPU stack $gpu_choice"
 else
-    read -p "Select Driver Stack [$gpu_default]: " gpu_choice
+    read -r -p "Choose a graphics option [$gpu_default]: " gpu_choice
     gpu_choice=${gpu_choice:-$gpu_default}
 fi
+[[ "$gpu_choice" =~ ^[1-4]$ ]] || usage_error "Choose a graphics option from 1 to 4."
 
 if [ "$gpu_choice" = "1" ] && [ "$HOST_OS" != "FreeBSD" ] && ! has_nvidia_container_support; then
     echo -e "${YELLOW}Nvidia GPU detected, but Podman GPU support is not configured.${NC}"
@@ -394,11 +392,13 @@ if [ "$gpu_choice" = "1" ] && [ "$HOST_OS" != "FreeBSD" ] && ! has_nvidia_contai
     else
         echo "1) Fall back to Generic / None / Software Rendering"
         echo "2) Abort and configure Nvidia container support first"
-        read -p "Selection [1]: " nvidia_fallback_choice
+        read -r -p "Choose how to proceed [1]: " nvidia_fallback_choice
         nvidia_fallback_choice=${nvidia_fallback_choice:-1}
-        if [ "$nvidia_fallback_choice" = "2" ]; then
-            fail "Aborted so Nvidia container support can be configured first."
-        fi
+        case "$nvidia_fallback_choice" in
+            1) ;;
+            2) fail "Configure Nvidia container support, then run the installer again." ;;
+            *) usage_error "Choose 1 for software rendering or 2 to exit." ;;
+        esac
         log "WARN" "Nvidia container support is unavailable; falling back to Generic / software rendering."
         gpu_choice=4
     fi
@@ -418,15 +418,14 @@ case $gpu_choice in
 esac
 
 if [ "$HOST_OS" = "FreeBSD" ]; then
-    echo -e "\n${YELLOW}FreeBSD host detected. Distrobox is Linux-only; installing native Wine.${NC}"
+    echo -e "\n${YELLOW}FreeBSD setup uses native Wine from pkg.${NC}"
     LAST_STEP="freebsd:packages"
-    log "INFO" "Starting FreeBSD native Wine install. Logs: $LOG_FILE"
-    prepare_freebsd_setup
     if [ "$DRY_RUN" = true ]; then
-        log "INFO" "DRY RUN: would run $SETUP_DIR/install-freebsd.sh"
-        echo -e "${GREEN}DRY RUN complete (FreeBSD native Wine path).${NC}"
+        log "INFO" "DRY RUN: would install Wine with pkg, set up xTool Studio, and add a desktop entry."
         exit 0
     fi
+    log "INFO" "Installing xTool Studio with native Wine. Setup log: $LOG_FILE"
+    prepare_setup "$FREEBSD_SETUP_SRC" || fail "Could not prepare the FreeBSD setup files in $SETUP_DIR."
     bash "$SETUP_DIR/install-freebsd.sh" 2>&1 | tee -a "$LOG_FILE"
     freebsd_rc=${PIPESTATUS[0]:-0}
     if [ "$freebsd_rc" -ne 0 ]; then
@@ -435,48 +434,41 @@ if [ "$HOST_OS" = "FreeBSD" ]; then
     if [ ! -f "$HOME/.local/share/applications/xToolStudio.desktop" ]; then
         fail "Desktop file was not created. See $LOG_FILE for details."
     fi
-    echo -e "${GREEN}Installation successful!${NC}"
-    echo -e "Launch from the app menu, or run: $HOME/.local/bin/xToolStudio"
-    echo -e "If the menu entry is missing, add ~/.local/bin to PATH and log out/in."
+    echo -e "${GREEN}Setup complete.${NC}"
+    printf 'Open xTool Studio from your app menu or run "%s/.local/bin/xToolStudio".\n' "$HOME"
+    printf 'Desktop launch log: %s/launch.log\n' "$LOG_DIR"
     exit 0
 fi
 
 # --- Step 2: Image Source ---
-echo -e "\n${YELLOW}--- Step 2: Image Source ---${NC}"
-echo "1) Standard Ubuntu 24.04 from DockerHub (Default)"
-echo "2) Custom Local Containerfile (Build locally)"
+echo -e "\n${YELLOW}--- Container image ---${NC}"
+echo "1) Ubuntu 24.04 (default)"
+echo "2) Build a local image"
 if [ -n "$img_choice" ]; then
     log "INFO" "Using image source from CLI: $img_choice"
 elif [ "$NON_INTERACTIVE" = true ]; then
     img_choice=1
     log "INFO" "Non-interactive: selecting image source $img_choice"
 else
-    read -p "Selection [1]: " img_choice
+    read -r -p "Choose an image source [1]: " img_choice
     img_choice=${img_choice:-1}
 fi
+[[ "$img_choice" =~ ^[1-2]$ ]] || usage_error "Choose 1 for Ubuntu or 2 for a local build."
 
 # Inform user what's next and where logs will go
 LAST_STEP="start"
-log "INFO" "Starting installation loop. Output will stream to console and $LOG_FILE"
-echo -e "\nStarting installation — streaming output to console and log: $LOG_FILE\n"
+if [ "$DRY_RUN" = false ]; then
+    log "INFO" "Installing xTool Studio in '$CONTAINER_NAME'. Setup log: $LOG_FILE"
+fi
 
 # --- Step 3: Installation Loop with DNS Retry ---
 SUCCESS=false
 USE_DNS=false
 
 while [ "$SUCCESS" = false ]; do
-    # Cleanup old container if exists
-    if distrobox list | grep -q "$CONTAINER_NAME"; then
-        if [ "$DRY_RUN" = true ]; then
-            log "INFO" "DRY RUN: would remove existing container $CONTAINER_NAME"
-        else
-            distrobox rm -f "$CONTAINER_NAME"
-        fi
-    fi
-
     CURRENT_ADD_FLAGS="$ADD_FLAGS"
     if [ "$USE_DNS" = true ]; then
-        echo -e "${YELLOW}DNS/Network issues detected. Re-creating container with explicit DNS (1.1.1.1)...${NC}"
+        echo -e "${YELLOW}Retrying container setup with alternate DNS (1.1.1.1 and 8.8.8.8).${NC}"
         CURRENT_ADD_FLAGS="$CURRENT_ADD_FLAGS --dns 1.1.1.1 --dns 8.8.8.8"
     fi
 
@@ -508,19 +500,22 @@ while [ "$SUCCESS" = false ]; do
     fi
 
     # Image Preparation
-    IMAGE_NAME="ubuntu:24.04"
+    IMAGE_NAME="docker.io/library/ubuntu:24.04"
     if [ "$img_choice" == "2" ]; then
-        if [ -f "$CONTAINERFILE" ]; then
+        [ -f "$SCRIPT_DIR/$CONTAINERFILE" ] || fail "Cannot find $CONTAINERFILE. Download a fresh copy of the release."
+        IMAGE_NAME="localhost/xtool-custom-$GPU_TYPE:latest"
+        if [ "$USE_DNS" = false ]; then
             log "INFO" "Building local image from $CONTAINERFILE"
-            if [ "$DRY_RUN" = true ]; then
-                log "INFO" "DRY RUN: would run podman build -t xtool-custom-$GPU_TYPE -f $CONTAINERFILE ."
-            else
-                run_logged podman build -t "xtool-custom-$GPU_TYPE" -f "$CONTAINERFILE" . || fail "Image build failed. See $LOG_FILE for details."
-            fi
-            IMAGE_NAME="xtool-custom-$GPU_TYPE"
-        else
-            echo -e "${RED}Warning: $CONTAINERFILE not found, using standard image.${NC}"
+            run_logged podman build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/$CONTAINERFILE" "$SCRIPT_DIR" || fail "Image build failed. See $LOG_FILE for details."
         fi
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+        log "INFO" "DRY RUN: would replace the '$CONTAINER_NAME' container if it exists."
+    elif container_exists; then
+        LAST_STEP="container:remove"
+        log "INFO" "Replacing the existing '$CONTAINER_NAME' container. Files in your home directory are kept."
+        run_logged distrobox rm -f "$CONTAINER_NAME" || fail "Could not remove '$CONTAINER_NAME'. See $LOG_FILE for details."
     fi
 
     echo -e "${BLUE}Creating Distrobox container...${NC}"
@@ -536,12 +531,11 @@ while [ "$SUCCESS" = false ]; do
 
     LAST_STEP="install:packages"
     log "INFO" "Installing packages and downloading application inside container"
-    prepare_container_setup
-
     if [ "$DRY_RUN" = true ]; then
-        log "INFO" "DRY RUN: would run $SETUP_DIR/container-setup.sh inside container"
-        SUCCESS=true
+        log "INFO" "DRY RUN: would install Wine and xTool Studio, then add xTool Studio to your app menu."
+        exit 0
     else
+        prepare_setup "$CONTAINER_SETUP_SRC" || fail "Could not prepare the container setup files in $SETUP_DIR."
         enter_container /bin/bash "$SETUP_DIR/container-setup.sh"
         install_rc=$?
         if [ $install_rc -eq 0 ] && verify_container_setup; then
@@ -552,7 +546,7 @@ while [ "$SUCCESS" = false ]; do
                 log "ERROR" "Container setup returned success, but /usr/local/bin/xToolStudio or its desktop entry is missing inside $CONTAINER_NAME"
             fi
             if [ "$USE_DNS" = false ]; then
-                log "WARN" "Installation inside container failed (rc=$install_rc). Retrying with DNS fix..."
+                log "WARN" "Container setup failed (exit $install_rc). Retrying once with alternate DNS."
                 USE_DNS=true
             else
                 fail "Installation failed twice. See $LOG_FILE for details."
@@ -562,44 +556,19 @@ while [ "$SUCCESS" = false ]; do
 done
 
 # --- Step 4: Export & Final Fixes ---
-echo -e "\n${BLUE}🔗 Exporting application and applying fixes...${NC}"
+echo -e "\n${BLUE}Adding xTool Studio to your app menu...${NC}"
 LAST_STEP="export:app"
-log "INFO" "Exporting application"
-if [ "$DRY_RUN" = true ]; then
-    log "INFO" "DRY RUN: would run distrobox-export for xToolStudio"
-else
-    enter_container distrobox-export --app xToolStudio || fail "Application export failed. See $LOG_FILE for details."
+enter_container distrobox-export --app xToolStudio || fail "Could not export xTool Studio. See $LOG_FILE for details."
+desktop_dir="$HOME/.local/share/applications"
+desktop_file="$desktop_dir/$CONTAINER_NAME-xToolStudio.desktop"
+if [ ! -f "$desktop_file" ]; then
+    fail "Distrobox did not create $desktop_file. See $LOG_FILE for details."
 fi
-
-D_FILES=()
-if [ -d "$HOME/.local/share/applications" ]; then
-    while IFS= read -r desktop_file; do
-        D_FILES+=("$desktop_file")
-    done < <(find "$HOME/.local/share/applications" -maxdepth 1 -iname "*xToolStudio*.desktop" | sort)
-
-    if [ ${#D_FILES[@]} -eq 0 ]; then
-        while IFS= read -r desktop_file; do
-            D_FILES+=("$desktop_file")
-        done < <(find "$HOME/.local/share/applications" -maxdepth 1 -iname "*xtool*.desktop" | sort)
-    fi
+sed -i 's|/run/host||' "$desktop_file" || fail "Could not update $desktop_file."
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$desktop_dir" || log "WARN" "Could not refresh the desktop menu database."
 fi
-
-if [ ${#D_FILES[@]} -gt 0 ]; then
-    for D_FILE in "${D_FILES[@]}"; do
-        sed -i 's|/run/host||' "$D_FILE"
-    done
-
-    [ -x "$(command -v update-desktop-database)" ] && update-desktop-database ~/.local/share/applications
-    echo -e "${GREEN}Installation successful!${NC}"
-    echo -e "You can now find 'xTool Studio' in your app menu."
-    echo "The launcher is inside the '$CONTAINER_NAME' container; the host's /usr/local/bin is not used."
-    echo "Runtime log: $HOME/.cache/xtool-studio-cachy-box/launch.log"
-else
-    if [ "$DRY_RUN" = true ]; then
-        log "INFO" "DRY RUN: desktop file would be created at ~/.local/share/applications/*xtool*.desktop"
-        exit 0
-    fi
-    echo -e "${RED}Export failed. Desktop file not found.${NC}"
-    echo "See $LOG_FILE for details"
-    exit 1
-fi
+echo -e "${GREEN}Setup complete.${NC}"
+echo "Open xTool Studio from your app menu."
+printf 'For terminal output, run distrobox enter --no-workdir %s -- /usr/local/bin/xToolStudio\n' "$CONTAINER_NAME"
+printf 'Desktop launch log: %s/launch.log\n' "$LOG_DIR"

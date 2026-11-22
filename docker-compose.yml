@@ -31,49 +31,49 @@ services:
           local notes_url="https://support.xtool.com/article/1773"
           local fallback_url="https://storage.atomm.com/efficacy/atomm-package/prod/packages/109/d7cb892b-c082-4565-803e-5e71b9f8026b/xTool-Studio-x64-1.6.6.exe"
           local latest_response latest_url
-          latest_response=$(curl --fail -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 "$notes_url" || true)
-          latest_url=$(printf "%s" "$latest_response" | grep -oE 'https://storage[^"[:space:]]+/xTool-Studio-x64-[^"[:space:]]+\.exe' | head -n 1)
-          if [ -n "$latest_url" ]; then
-            printf "%s\n" "$latest_url"
+          latest_response=$$(curl --fail -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 "$$notes_url" || true)
+          latest_url=$$(printf "%s" "$$latest_response" | grep -oE 'https://storage\.atomm\.com/[^"[:space:]]+/xTool-Studio-x64-[^"[:space:]]+\.exe' | head -n 1 || true)
+          if [ -n "$$latest_url" ]; then
+            printf "%s\n" "$$latest_url"
           else
-            printf "%s\n" "$fallback_url"
+            printf "%s\n" "$$fallback_url"
           fi
         }
-        XTOOL_DOWNLOAD_URL="$XTOOL_URL"
-        if [ -z "$XTOOL_DOWNLOAD_URL" ]; then
-          XTOOL_DOWNLOAD_URL=$(resolve_latest_xtool_url)
+        XTOOL_DOWNLOAD_URL="$$XTOOL_URL"
+        if [ -z "$$XTOOL_DOWNLOAD_URL" ]; then
+          XTOOL_DOWNLOAD_URL=$$(resolve_latest_xtool_url)
         fi
-        mkdir -p "$HOME/.local/bin" "$HOME/.local/share/xtool-studio/downloads"
-        XTOOL_URL_FILE="$HOME/.local/share/xtool-studio/last-download-url"
-        XTOOL_INSTALLER_PATH="$HOME/.local/share/xtool-studio/downloads/xTool-Studio-setup.exe"
-        if [ ! -f "$XTOOL_INSTALLER_PATH" ] || [ ! -f "$XTOOL_URL_FILE" ] || [ "$(cat "$XTOOL_URL_FILE" 2>/dev/null || true)" != "$XTOOL_DOWNLOAD_URL" ]; then
-          curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$XTOOL_DOWNLOAD_URL" -o "$XTOOL_INSTALLER_PATH"
-          printf "%s\n" "$XTOOL_DOWNLOAD_URL" > "$XTOOL_URL_FILE"
+        mkdir -p "$$HOME/.local/bin" "$$HOME/.local/share/xtool-studio/downloads"
+        XTOOL_URL_FILE="$$HOME/.local/share/xtool-studio/last-download-url"
+        XTOOL_INSTALLER_PATH="$$HOME/.local/share/xtool-studio/downloads/xTool-Studio-setup.exe"
+        if [ ! -f "$$XTOOL_INSTALLER_PATH" ] || [ ! -f "$$XTOOL_URL_FILE" ] || [ "$$(cat "$$XTOOL_URL_FILE" 2>/dev/null || true)" != "$$XTOOL_DOWNLOAD_URL" ]; then
+          curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$$XTOOL_DOWNLOAD_URL" -o "$$XTOOL_INSTALLER_PATH"
+          printf "%s\n" "$$XTOOL_DOWNLOAD_URL" > "$$XTOOL_URL_FILE"
         fi
         printf '%s\n' \
           '#!/bin/sh' \
           'set -eu' \
-          'APP_HOME="$HOME/.local/share/xtool-studio"' \
-          'PREFIX_DIR="$APP_HOME/prefix"' \
-          'INSTALLER_PATH="$APP_HOME/downloads/xTool-Studio-setup.exe"' \
-          'mkdir -p "$APP_HOME" "$APP_HOME/downloads"' \
-          'export WINEPREFIX="$PREFIX_DIR"' \
+          'APP_HOME="$$HOME/.local/share/xtool-studio"' \
+          'PREFIX_DIR="$$APP_HOME/prefix"' \
+          'INSTALLER_PATH="$$APP_HOME/downloads/xTool-Studio-setup.exe"' \
+          'mkdir -p "$$APP_HOME" "$$APP_HOME/downloads"' \
+          'export WINEPREFIX="$$PREFIX_DIR"' \
           'export WINEARCH=win64' \
-          'if [ ! -d "$PREFIX_DIR" ]; then' \
+          'if [ ! -d "$$PREFIX_DIR" ]; then' \
           '  wineboot -u >/dev/null 2>&1 || true' \
           'fi' \
-          'if [ "${XTOOL_FORCE_SOFTWARE_RENDERING:-0}" = "1" ]; then' \
-          '  export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"' \
-          '  export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"' \
-          '  export MESA_LOADER_DRIVER_OVERRIDE="${MESA_LOADER_DRIVER_OVERRIDE:-llvmpipe}"' \
+          'if [ "$${XTOOL_FORCE_SOFTWARE_RENDERING:-0}" = "1" ]; then' \
+          '  export LIBGL_ALWAYS_SOFTWARE="$${LIBGL_ALWAYS_SOFTWARE:-1}"' \
+          '  export GALLIUM_DRIVER="$${GALLIUM_DRIVER:-llvmpipe}"' \
+          '  export MESA_LOADER_DRIVER_OVERRIDE="$${MESA_LOADER_DRIVER_OVERRIDE:-llvmpipe}"' \
           'fi' \
-          'APP_EXE=$(find "$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
-          'if [ -z "$APP_EXE" ]; then' \
-          '  wine "$INSTALLER_PATH"' \
-          '  APP_EXE=$(find "$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
+          'APP_EXE=$$(find "$$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
+          'if [ -z "$$APP_EXE" ]; then' \
+          '  wine "$$INSTALLER_PATH"' \
+          '  APP_EXE=$$(find "$$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
           'fi' \
-          '[ -n "$APP_EXE" ] || { echo "xTool Studio executable not found after installer exit." >&2; exit 1; }' \
-          'exec wine "$APP_EXE" "$@"' \
-          > "$HOME/.local/bin/xToolStudio"
-        chmod +x "$HOME/.local/bin/xToolStudio"
-        exec "$HOME/.local/bin/xToolStudio"
+          '[ -n "$$APP_EXE" ] || { echo "xTool Studio executable not found after installer exit." >&2; exit 1; }' \
+          'exec wine "$$APP_EXE" "$$@"' \
+          > "$$HOME/.local/bin/xToolStudio"
+        chmod +x "$$HOME/.local/bin/xToolStudio"
+        exec "$$HOME/.local/bin/xToolStudio"

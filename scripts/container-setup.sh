@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -39,10 +39,10 @@ xtool_install_wine() {
         ver="$(wine --version 2>/dev/null || true)"
         major="$(printf '%s\n' "$ver" | sed -n 's/^wine-\([0-9][0-9]*\).*/\1/p' | head -n 1)"
         if [ -n "$major" ] && [ "$major" -ge 10 ]; then
-            echo "Wine already new enough for xTool Studio 1.9.11: $ver"
+            echo "Using $ver for xTool Studio."
             return 0
         fi
-        echo "Found ${ver:-no wine}; replacing Ubuntu Wine 9 with WineHQ 11"
+        echo "Found ${ver:-no Wine}. Installing a newer Wine from WineHQ."
     fi
 
     echo 'Enabling i386 architecture for Wine'
@@ -73,7 +73,7 @@ xtool_install_wine() {
     echo 'Removing Ubuntu Wine 9 packages if they are present'
     sudo apt-get remove -y wine64 wine32 wine32:i386 wine libwine fonts-wine || true
 
-    echo 'Installing WineHQ stable (Wine 11)'
+    echo 'Installing WineHQ stable'
     if ! sudo apt-get install -y --install-recommends winehq-stable; then
         echo 'WineHQ stable failed; trying WineHQ devel' >&2
         sudo apt-get install -y --install-recommends winehq-devel || true
@@ -82,17 +82,17 @@ xtool_install_wine() {
     ver="$(command -v wine >/dev/null 2>&1 && wine --version 2>/dev/null || true)"
     major="$(printf '%s\n' "$ver" | sed -n 's/^wine-\([0-9][0-9]*\).*/\1/p' | head -n 1)"
     if [ -z "$major" ] || [ "$major" -lt 10 ]; then
-        echo "ERROR: xTool Studio 1.9.11 needs Wine 10+ (WineHQ 11). Found: ${ver:-no wine}." >&2
+        echo "ERROR: LinuxBox requires Wine 10 or newer. Found ${ver:-no Wine}." >&2
         echo 'WineHQ did not install. Check that dl.winehq.org is reachable and i386 packages installed.' >&2
         return 1
     fi
     echo "WineHQ installed: $ver"
 }
 
-echo 'Running: apt update'
+echo 'Refreshing Ubuntu package lists'
 sudo apt-get update
 
-echo 'Running: apt install'
+echo 'Installing Ubuntu runtime packages'
 PACKAGES=(
     curl
     ca-certificates

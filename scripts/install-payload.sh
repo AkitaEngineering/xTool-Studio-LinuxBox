@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Shared xTool Studio payload installer. Sourced by container-setup.sh and
 # install-freebsd.sh. Requires XTOOL_URL. Optional: XTOOL_FORCE_SOFTWARE_RENDERING.
 
@@ -358,7 +358,7 @@ xtool_clear_electron_gpu_caches() {
 
 xtool_install_payload() {
     local app_home installer_dir payload_dir prefix_dir
-    local url_record extracted_url_record installer_path
+    local url_record extracted_url_record installer_path download_path
     local user_name app_install_dir nsis_plugin_dir archive extractor
 
     : "${XTOOL_URL:?XTOOL_URL is required}"
@@ -388,7 +388,14 @@ xtool_install_payload() {
 
     if [ ! -f "$installer_path" ] || [ ! -f "$url_record" ] || [ "$(cat "$url_record")" != "$XTOOL_URL" ]; then
         echo 'Downloading xTool Studio Windows installer (with retries)'
-        curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$XTOOL_URL" -o "$installer_path"
+        download_path="$(mktemp "$installer_dir/.xtool-download.XXXXXX")" || return 1
+        if ! curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 1200 \
+            --progress-bar -o "$download_path" -- "$XTOOL_URL"; then
+            rm -f "$download_path"
+            echo 'Could not download xTool Studio. Check your connection or pass a current Windows installer URL with --url.' >&2
+            return 1
+        fi
+        mv -f "$download_path" "$installer_path"
         printf '%s\n' "$XTOOL_URL" > "$url_record"
     fi
 
@@ -407,8 +414,8 @@ xtool_install_payload() {
             archive="$(find "$payload_dir" -type f -name 'app-64.7z' -print | head -n 1)"
         fi
         if [ -z "$archive" ] || [ ! -f "$archive" ]; then
-            echo "Could not find app-64.7z in the extracted NSIS payload." >&2
-            echo "Installer format may have changed. Payload contents:" >&2
+            echo "Could not extract xTool Studio. Check that the URL points to the x64 Windows installer." >&2
+            echo "The expected app-64.7z archive was missing. Extracted files follow." >&2
             find "$payload_dir" -maxdepth 3 -print >&2 || true
             return 1
         fi
