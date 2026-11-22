@@ -31,4 +31,4 @@ Windows prompts to install RNDIS or CH340 drivers refer to Windows USB helpers. 
 
 ## Report an issue
 
-Include the LinuxBox release tag, your OS and desktop session (X11 or Wayland), GPU, xTool Studio version, and the steps up to the error. For device issues, add the machine model and how it connects. Paste the relevant part of the setup or launch log after removing private paths, device identifiers, and account details. [GitHub issues](https://github.com/sh4un-dot-com/xTool-Studio-LinuxBox/issues)
+Include the LinuxBox release tag, your OS and desktop session (X11 or Wayland), GPU, xTool Studio version, and the steps up to the error. For device issues, add the machine model and how it connects. Paste the relevant part of the setup or launch log after removing private paths, device identifiers, and account details. [GitHub issues](https://github.com/AkitaEngineering/xTool-Studio-LinuxBox/issues)

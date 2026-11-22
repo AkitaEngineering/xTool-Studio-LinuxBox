@@ -4,7 +4,7 @@ Run the Windows edition of xTool Studio on x86-64 Linux with Wine, Distrobox, an
 
 **xTool Studio LinuxBox is an [Akita Engineering](https://www.akitaengineering.com) project.** xTool publishes and supports xTool Studio for Windows and macOS. LinuxBox provides community compatibility for Linux and FreeBSD. [xTool system requirements](https://support.xtool.com/article/2403)
 
-[Download the latest release](https://github.com/sh4un-dot-com/xTool-Studio-LinuxBox/releases/latest) · [Troubleshooting](docs/troubleshooting.md) · [Changelog](CHANGELOG.md)
+[Download the latest release](https://github.com/AkitaEngineering/xTool-Studio-LinuxBox/releases/latest) · [Troubleshooting](docs/troubleshooting.md) · [Changelog](CHANGELOG.md)
 
 ## Before you install
 
@@ -17,7 +17,7 @@ Allow several GiB of free space for the container, Windows installer, and extrac
 
 ## Install and launch
 
-1. Download and extract **Source code (tar.gz)** from the [release page](https://github.com/sh4un-dot-com/xTool-Studio-LinuxBox/releases/latest). If you use Git, clone the release with `git clone --branch v1.0.0 https://github.com/sh4un-dot-com/xTool-Studio-LinuxBox.git`.
+1. Download and extract **Source code (tar.gz)** from the [release page](https://github.com/AkitaEngineering/xTool-Studio-LinuxBox/releases/latest). If you use Git, clone the release with `git clone --branch v1.0.0 https://github.com/AkitaEngineering/xTool-Studio-LinuxBox.git`.
 2. From a terminal in the extracted or cloned folder, run the following as your regular user.
 
    ```sh
