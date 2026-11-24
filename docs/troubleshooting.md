@@ -1,5 +1,9 @@
 # Troubleshooting xTool Studio LinuxBox
 
+## A newer xTool Studio build does not open
+
+LinuxBox installs xTool Studio 1.9.11 unless you pass `--experimental` or `--url`. On 1.11 the country window opens without the 1.9.11 graphics overrides, and the 1.9.11 archive patch is left unused because Electron rejects a changed `app.asar`. A log line about `rpc-preload.mjs` can appear while that window is already on screen. Rerun `./install.sh` without `--experimental` to return to 1.9.11.
+
 ## Setup stops before xTool Studio appears
 
 1. Run `./install.sh --check` and resolve any missing prerequisites.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The installer stays on xTool Studio 1.9.11. `--experimental` downloads the newest Windows build, and the 1.9.11 archive patch is not applied to other builds.
+- xTool Studio 1.11 launches without the 1.9.11 graphics overrides so its country window can open.
+
 ## 1.1.0 · 2026-11-22
 
 - Scripts and configuration are licensed under GPL-3.0-only. Installer behavior is unchanged. The v1.0.0 tag remains under the MIT license. Upstream portions from Sascha Schüller keep the MIT notice in `LICENSES/MIT.txt`.

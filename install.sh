@@ -60,8 +60,12 @@ run_logged(){
     return ${PIPESTATUS[0]:-0}
 }
 
-resolve_latest_xtool_url(){
-    local latest_response latest_url
+xtool_release_note_urls(){
+    printf '%s' "$1" | grep -oE 'https://storage\.atomm\.com/[^"[:space:]<>]+/xTool-Studio-x64-[0-9.]+\.exe' || true
+}
+
+resolve_xtool_url(){
+    local notes supported_url experimental_url
 
     if [ -n "$XTOOL_URL" ]; then
         case "$XTOOL_URL_SOURCE" in
@@ -76,21 +80,36 @@ resolve_latest_xtool_url(){
     fi
 
     if [ "$DRY_RUN" = true ]; then
-        log "INFO" "DRY RUN: would look up the Windows installer at $XTOOL_RELEASE_NOTES_URL"
+        if [ "$EXPERIMENTAL" = true ]; then
+            log "INFO" "DRY RUN: would look up the newest experimental Windows installer at $XTOOL_RELEASE_NOTES_URL"
+        else
+            log "INFO" "DRY RUN: would install supported xTool Studio $SUPPORTED_XTOOL_VERSION"
+        fi
         return 0
     fi
 
-    latest_response=$(curl -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 \
+    notes=$(curl -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 \
         "$XTOOL_RELEASE_NOTES_URL" 2>>"$LOG_FILE" || true)
 
-    latest_url=$(printf '%s' "$latest_response" | grep -oE 'https://storage\.atomm\.com/[^"[:space:]<>]+/xTool-Studio-x64-[0-9.]+\.exe' | head -n 1)
+    if [ "$EXPERIMENTAL" = true ]; then
+        experimental_url=$(xtool_release_note_urls "$notes" | head -n 1)
+        if [ -n "$experimental_url" ]; then
+            XTOOL_URL="$experimental_url"
+            log "WARN" "Experimental xTool Studio build selected. LinuxBox supports $SUPPORTED_XTOOL_VERSION. Newer builds may not start: $XTOOL_URL"
+        else
+            XTOOL_URL="$SUPPORTED_XTOOL_URL"
+            log "WARN" "Could not resolve an experimental xTool Studio build. Keeping supported $SUPPORTED_XTOOL_VERSION: $XTOOL_URL"
+        fi
+        return 0
+    fi
 
-    if [ -n "$latest_url" ]; then
-        XTOOL_URL="$latest_url"
-        log "INFO" "Resolved latest xTool Studio Windows installer: $XTOOL_URL"
+    supported_url=$(xtool_release_note_urls "$notes" | grep -F "xTool-Studio-x64-${SUPPORTED_XTOOL_VERSION}.exe" | head -n 1)
+    if [ -n "$supported_url" ]; then
+        XTOOL_URL="$supported_url"
+        log "INFO" "Using supported xTool Studio $SUPPORTED_XTOOL_VERSION: $XTOOL_URL"
     else
-        XTOOL_URL="$DEFAULT_XTOOL_URL"
-        log "WARN" "Unable to resolve the latest xTool Studio release; falling back to $XTOOL_URL"
+        XTOOL_URL="$SUPPORTED_XTOOL_URL"
+        log "WARN" "Could not find xTool Studio $SUPPORTED_XTOOL_VERSION in the release notes. Using the bundled URL: $XTOOL_URL"
     fi
 }
 
@@ -109,8 +128,9 @@ build_distrobox_create_cmd(){
     DBX_CREATE_CMD+=(--yes)
 }
 
-# latest-release resolution (can be overridden with XTOOL_URL or --url)
-DEFAULT_XTOOL_URL="https://storage.atomm.com/efficacy/atomm-package/prod/packages/109/d7cb892b-c082-4565-803e-5e71b9f8026b/xTool-Studio-x64-1.6.6.exe"
+# Supported Windows build. Newer xTool Studio releases stay opt-in.
+SUPPORTED_XTOOL_VERSION="1.9.11"
+SUPPORTED_XTOOL_URL="https://storage.atomm.com/efficacy/atomm-package/packages/109/afffecbb-38d7-40ed-8bba-7e7acee5c18c/xTool-Studio-x64-1.9.11.exe"
 XTOOL_RELEASE_NOTES_URL="https://support.xtool.com/article/1773"
 XTOOL_URL="${XTOOL_URL:-}"
 XTOOL_URL_SOURCE=""
@@ -122,6 +142,7 @@ NON_INTERACTIVE=false
 DRY_RUN=false
 PRECHECK=false
 UNINSTALL=false
+EXPERIMENTAL=false
 CONTAINER_NAME="xtool-studio"
 gpu_choice=""
 img_choice=""
@@ -142,12 +163,14 @@ Options
   --gpu 1-4                1 Nvidia, 2 AMD, 3 Intel, 4 software rendering.
   --image-source 1-2       Linux only. 1 stock Ubuntu, 2 local image build.
   --container-name NAME    Linux only. Default is xtool-studio.
-  --url URL                Override the xTool Studio Windows installer URL.
+  --url URL                Download one x64 Windows installer instead of 1.9.11.
+  --experimental           Download the newest xTool Studio build. It may not start.
   --log-file PATH          Write the log to PATH during installation.
   --uninstall              Run the uninstaller. Add --dry-run for a preview.
   --help, -h               Show this help.
 
-Linux uses Distrobox and Podman. FreeBSD installs Wine through pkg.
+The default Windows build is xTool Studio 1.9.11. Linux uses Distrobox and
+Podman. FreeBSD installs Wine through pkg.
 EOF
 }
 
@@ -172,6 +195,8 @@ while [[ "$#" -gt 0 ]]; do
             UNINSTALL=true; shift ;;
         --url)
             XTOOL_URL="$2"; XTOOL_URL_SOURCE="cli"; shift 2 ;;
+        --experimental)
+            EXPERIMENTAL=true; shift ;;
         --container-name)
             CONTAINER_NAME="$2"; shift 2 ;;
         --gpu)
@@ -185,6 +210,10 @@ while [[ "$#" -gt 0 ]]; do
         *) usage_error "Unknown option '$1'." ;;
     esac
 done
+
+if [ "$EXPERIMENTAL" = true ] && [ -n "$XTOOL_URL" ]; then
+    usage_error "Use either --experimental or --url, not both."
+fi
 
 [[ "$CONTAINER_NAME" =~ ^[[:alnum:]][[:alnum:]_.-]*$ ]] || usage_error "Invalid container name '$CONTAINER_NAME'."
 [[ -z "$gpu_choice" || "$gpu_choice" =~ ^[1-4]$ ]] || usage_error "--gpu needs a number from 1 to 4."
@@ -333,8 +362,7 @@ prepare_setup(){
 }
 
 
-# --- Download URL for the latest Windows installer ---
-# (may be overridden with --url)
+# --- Windows installer: supported 1.9.11, or --experimental for newest ---
 
 # if --check was given, run preflight and exit
 if [ "$PRECHECK" = true ]; then
@@ -346,7 +374,7 @@ if [ "$DRY_RUN" = false ] && ! command -v curl &>/dev/null; then
     fail "Install curl with your host package manager, then run the installer again."
 fi
 
-resolve_latest_xtool_url
+resolve_xtool_url
 
 
 # --- GPU Selection ---

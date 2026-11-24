@@ -19,6 +19,7 @@ services:
       - LANG=en_US.UTF-8
       - LC_ALL=en_US.UTF-8
       - XTOOL_URL=${XTOOL_URL:-}
+      - XTOOL_EXPERIMENTAL=${XTOOL_EXPERIMENTAL:-}
       - XTOOL_FORCE_SOFTWARE_RENDERING=${XTOOL_FORCE_SOFTWARE_RENDERING:-0}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
@@ -30,22 +31,29 @@ services:
       - -lc
       - |
         set -euo pipefail
-        resolve_latest_xtool_url() {
+        resolve_xtool_url() {
           local notes_url="https://support.xtool.com/article/1773"
-          local fallback_url="https://storage.atomm.com/efficacy/atomm-package/prod/packages/109/d7cb892b-c082-4565-803e-5e71b9f8026b/xTool-Studio-x64-1.6.6.exe"
-          local latest_response latest_url
-          latest_response=$$(curl --fail -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 "$$notes_url" || true)
-          latest_url=$$(printf "%s" "$$latest_response" | grep -oE 'https://storage\.atomm\.com/[^"[:space:]]+/xTool-Studio-x64-[^"[:space:]]+\.exe' | head -n 1 || true)
-          if [ -n "$$latest_url" ]; then
-            printf "%s\n" "$$latest_url"
+          local supported_version="1.9.11"
+          local supported_url="https://storage.atomm.com/efficacy/atomm-package/packages/109/afffecbb-38d7-40ed-8bba-7e7acee5c18c/xTool-Studio-x64-1.9.11.exe"
+          local notes picked
+          if [ -n "$${XTOOL_URL:-}" ]; then
+            printf "%s\n" "$$XTOOL_URL"
+            return 0
+          fi
+          notes=$$(curl --fail -fsSL --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 60 "$$notes_url" || true)
+          if [ "$${XTOOL_EXPERIMENTAL:-}" = "1" ]; then
+            echo "Experimental xTool Studio build selected. LinuxBox supports $$supported_version." >&2
+            picked=$$(printf "%s" "$$notes" | grep -oE 'https://storage\.atomm\.com/[^"[:space:]]+/xTool-Studio-x64-[0-9.]+\.exe' | head -n 1 || true)
           else
-            printf "%s\n" "$$fallback_url"
+            picked=$$(printf "%s" "$$notes" | grep -oE 'https://storage\.atomm\.com/[^"[:space:]]+/xTool-Studio-x64-[0-9.]+\.exe' | grep -F "xTool-Studio-x64-$$supported_version.exe" | head -n 1 || true)
+          fi
+          if [ -n "$$picked" ]; then
+            printf "%s\n" "$$picked"
+          else
+            printf "%s\n" "$$supported_url"
           fi
         }
-        XTOOL_DOWNLOAD_URL="$$XTOOL_URL"
-        if [ -z "$$XTOOL_DOWNLOAD_URL" ]; then
-          XTOOL_DOWNLOAD_URL=$$(resolve_latest_xtool_url)
-        fi
+        XTOOL_DOWNLOAD_URL=$$(resolve_xtool_url)
         mkdir -p "$$HOME/.local/bin" "$$HOME/.local/share/xtool-studio/downloads"
         XTOOL_URL_FILE="$$HOME/.local/share/xtool-studio/last-download-url"
         XTOOL_INSTALLER_PATH="$$HOME/.local/share/xtool-studio/downloads/xTool-Studio-setup.exe"

@@ -76,6 +76,7 @@ expect_usage_error ./install.sh --gpu
 expect_usage_error ./install.sh --gpu 7
 expect_usage_error ./install.sh --image-source --yes
 expect_usage_error ./install.sh --unexpected
+expect_usage_error ./install.sh --experimental --url https://example.invalid/xTool-Studio-x64-1.2.3.exe
 expect_usage_error ./uninstall.sh --log-file
 expect_usage_error ./uninstall.sh --container-name 'invalid/name'
 
@@ -83,7 +84,9 @@ expect_usage_error ./uninstall.sh --container-name 'invalid/name'
 grep -Fq 'Host prerequisite check passed' "$scratch/output"
 ./install.sh --dry-run --yes --gpu 4 --log-file "$scratch/install.log" > "$scratch/output"
 grep -Fq "would replace the 'xtool-studio' container" "$scratch/output"
-grep -Fq 'would look up the Windows installer' "$scratch/output"
+grep -Fq 'would install supported xTool Studio 1.9.11' "$scratch/output"
+./install.sh --dry-run --yes --gpu 4 --experimental > "$scratch/output"
+grep -Fq 'newest experimental Windows installer' "$scratch/output"
 
 ./install.sh --uninstall --dry-run --yes --log-file "$scratch/uninstall.log" > "$scratch/output"
 grep -Fq "Would remove the xTool Studio desktop export and 'xtool-studio' container" "$scratch/output"
@@ -108,7 +111,7 @@ if command -v fish >/dev/null; then
     export XDG_CONFIG_HOME="$scratch/fish-config"
     export XDG_DATA_HOME="$scratch/fish-data"
     ./install.fish --dry-run --yes --gpu 4 > "$scratch/output"
-    grep -Fq 'would look up the Windows installer' "$scratch/output"
+    grep -Fq 'would install supported xTool Studio 1.9.11' "$scratch/output"
     ./uninstall.fish --dry-run --yes > "$scratch/output"
     grep -Fq 'Preview complete' "$scratch/output"
 fi
@@ -138,4 +141,11 @@ fi
 [ -f "$backup_desktop" ]
 [ -d "$HOME/.local/share/xtool-studio/prefix" ]
 [ -s "$scratch/uninstall.log" ]
+patch_file="$scratch/patch-me.bin"
+printf '%s' 'resizable:!1,transparent:!0,roundedCorners:!1' > "$patch_file"
+patch_before="$(cat "$patch_file")"
+bash -c 'source scripts/install-payload.sh; xtool_patch_electron_startup "$1"' _ "$patch_file" >"$scratch/patch.out" 2>&1
+[ "$patch_before" = "$(cat "$patch_file")" ]
+grep -Fq 'does not match the supported 1.9.11 window patch' "$scratch/patch.out"
+
 echo 'CLI smoke checks passed.'

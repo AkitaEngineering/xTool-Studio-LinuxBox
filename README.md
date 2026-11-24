@@ -30,7 +30,7 @@ Allow several GiB of free space for the container, Windows installer, and extrac
 3. Choose your GPU when prompted. On Linux, keep the default **Ubuntu 24.04** image unless you want to build a local image.
 4. Open **xTool Studio** from your app menu. Complete xTool's first-run questions in the app. If the Windows installer opens instead, complete it and open **xTool Studio** again.
 
-The installer looks for the newest x64 Windows installer linked in xTool's release notes. If the lookup fails, it uses the bundled fallback URL for xTool Studio 1.6.6. To choose a specific version, get its Windows installer URL from xTool and pass it with `--url` or set `XTOOL_URL`. [xTool release notes](https://support.xtool.com/article/1773)
+The installer downloads xTool Studio 1.9.11, the Windows build these compatibility fixes support. Pass `--experimental` to download the newest build from xTool's release notes instead. That track is still experimental. On 1.11 the country window can open, and later device setup is not covered by the 1.9.11 fixes. To choose one specific installer, pass its x64 Windows URL with `--url` or set `XTOOL_URL`. [xTool release notes](https://support.xtool.com/article/1773)
 
 ## Installer options
 
@@ -43,7 +43,8 @@ The installer looks for the newest x64 Windows installer linked in xTool's relea
 | `--gpu 1-4` | Select NVIDIA (1), AMD (2), Intel (3), or software rendering (4). |
 | `--image-source 1-2` | Linux only. Use stock Ubuntu (1) or build a local image (2). |
 | `--container-name NAME` | Linux only. Choose a container name. The default is `xtool-studio`. Names can differ while the Wine data is shared. |
-| `--url URL` | Download a specific x64 Windows installer. Overrides `XTOOL_URL`. |
+| `--url URL` | Download one x64 Windows installer instead of the supported 1.9.11 build. Overrides `XTOOL_URL`. |
+| `--experimental` | Download the newest xTool Studio build. It is unsupported and may not start. |
 | `--log-file PATH` | Choose where to write the setup log. The parent directory must exist. |
 | `--uninstall` | Run the uninstaller with the selected container name, logging, and preview options. |
 
@@ -61,7 +62,7 @@ FreeBSD terminal launch
 
 ## Upgrade or remove LinuxBox
 
-Download the new LinuxBox release and rerun `./install.sh` from its folder. On Linux the installer replaces the named container. The Wine prefix and cached installer live in your home directory and carry over from **xTool Studio Cachy Box**.
+Download the new LinuxBox release and rerun `./install.sh` from its folder. A rerun installs supported xTool Studio 1.9.11 and replaces a cached Windows installer when that URL changes. Pass `--experimental` to try a newer xTool Studio build instead of replacing the cache with 1.9.11. On Linux the installer replaces the named container. The Wine prefix and cached installer live in your home directory and carry over from **xTool Studio Cachy Box**.
 
 Run `./uninstall.sh` or `./uninstall.fish` to remove the launcher and setup files. On Linux, this also removes the selected Distrobox container and tries to remove unused LinuxBox images. The uninstaller asks whether to delete the Wine prefix and cached Windows installer. The default is to keep them. Add `--yes` to keep them and skip the question, `--dry-run` to preview removal, or `--container-name NAME` if you used a custom name.
 

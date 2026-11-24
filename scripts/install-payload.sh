@@ -160,6 +160,18 @@ xtool_patch_electron_startup() {
     improve_old_count="$(xtool_count_literal "$improve_old" "$app_asar")"
     wine_major="$(xtool_wine_major)"
 
+    # 1.11 and later embed an asar integrity hash. The old Start Page
+    # transparency string still occurs there, but the 1.9.11 window
+    # signatures do not. Rewriting that string makes Electron quit.
+    if [ "$isolation_old_count" -eq 0 ] && [ "$gate_hidden_count" -eq 0 ] && \
+       [ "$gate_shown_count" -eq 0 ] && [ "$gate_shown_frameless_count" -eq 0 ] && \
+       [ "$gate_framed_count" -eq 0 ] && [ "$launch_frame_old_count" -eq 0 ] && \
+       [ "$launch_frame_new_count" -eq 0 ] && [ "$max_old_count" -eq 0 ] && \
+       [ "$improve_old_count" -eq 0 ]; then
+        echo 'WARN: This xTool Studio build does not match the supported 1.9.11 window patch. Leaving app.asar unchanged.' >&2
+        return 0
+    fi
+
     if [ "$isolation_old_count" -eq 0 ] && [ "$gate_hidden_count" -eq 0 ] && \
        [ "$gate_shown_frameless_count" -eq 0 ] && \
        [ "$launch_frame_old_count" -eq 0 ] && [ "$launch_transparent_old_count" -eq 0 ]; then
@@ -260,7 +272,7 @@ xtool_patch_electron_startup() {
         echo "WARN: xTool launch window frame signature matched $launch_frame_old_count copies; leaving those bytes unchanged" >&2
     fi
 
-    if [ "$launch_transparent_old_count" -eq 1 ]; then
+    if [ "$launch_transparent_old_count" -eq 1 ] && [ "$launch_frame_old_count" -eq 1 ]; then
         echo "Applying xTool launch window opaque patch"
         if ! xtool_replace_same_length "$temp_asar" "$launch_transparent_old" "$launch_transparent_new" 1; then
             rm -f "$temp_asar"

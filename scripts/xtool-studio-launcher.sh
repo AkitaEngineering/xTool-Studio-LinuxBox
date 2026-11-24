@@ -200,19 +200,31 @@ printf 'Wine: %s\n' "$wine_ver"
 # xTool Studio 1.9.11 (Chromium 136) defaults to DirectComposition on Windows.
 # Wine's dcomp is unimplemented, the GPU process dies, and the first-run
 # country window never reaches did-finish-load. ANGLE GL avoids that path.
-# 1.6.6 still exits if Chromium --disable-gpu arguments are supplied.
+# 1.11 opens that window on its own. The same ANGLE flags make its GPU process
+# restart and the dialog never maps. 1.6.6 still exits if Chromium --disable-gpu
+# arguments are supplied.
 is_xtool_1911=0
+is_xtool_111=0
 APP_ASAR="$(dirname "$APP_EXE")/resources/app.asar"
-if [ -f "$APP_ASAR" ] && grep -F -- 'createCountrySelectWindow' "$APP_ASAR" >/dev/null 2>&1; then
+if [ -f "$APP_ASAR" ] && grep -F -- 'show:!1,frame:!1,movable:!0,webPreferences:{nodeIntegration:!0,contextIsolation:!1,webSecurity:!1}' "$APP_ASAR" >/dev/null 2>&1; then
 	is_xtool_1911=1
+elif [ -f "$APP_ASAR" ] && grep -F -- 'startup-dialog-preload.cjs' "$APP_ASAR" >/dev/null 2>&1; then
+	is_xtool_111=1
+fi
+if [ "$is_xtool_1911" = "1" ] || [ "$is_xtool_111" = "1" ]; then
 	# Glob: wine- + one digit + literal '.'  (wine-9.0 matches, wine-11.0 does not)
 	case "$wine_ver" in
 		wine-[0-9].*|wine-9.*)
-			echo 'xTool Studio 1.9.11 cannot open the country selection window with Wine 9.'
+			echo 'This xTool Studio build cannot open the country selection window with Wine 9.'
 			echo 'Run ./install.sh to update Wine. Check the Wine version in launch.log afterward.'
 			exit 3
 			;;
 	esac
+fi
+if [ "$is_xtool_111" = "1" ]; then
+	echo 'xTool Studio 1.11: opening its own first-run windows. The 1.9.11 graphics overrides are not applied.'
+fi
+if [ "$is_xtool_1911" = "1" ]; then
 	if [ "$force_software_rendering" = "1" ]; then
 		echo 'WARN: software rendering often cannot paint xTool Studio 1.9.11 first-run windows; the Nvidia/AMD/Intel GPU install option is recommended'
 	fi
@@ -292,7 +304,7 @@ stop_first_run_mapper() {
 	fi
 }
 
-if [ "$is_xtool_1911" = "1" ]; then
+if [ "$is_xtool_1911" = "1" ] || [ "$is_xtool_111" = "1" ]; then
 	start_first_run_mapper
 fi
 
