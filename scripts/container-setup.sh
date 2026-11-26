@@ -7,7 +7,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-SETUP_DIR="${XTOOL_SETUP_DIR:-$HOME/.cache/xtool-studio-cachy-box}"
+SETUP_DIR="${XTOOL_SETUP_DIR:-$(dirname -- "${BASH_SOURCE[0]}")}"
 ENV_FILE="${XTOOL_SETUP_ENV:-$SETUP_DIR/container-setup.env}"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -141,6 +141,7 @@ xtool_install_payload
 # explicitly because minimal base images are not required to ship it.
 sudo mkdir -p /usr/local/bin
 sudo install -m 0755 "$XTOOL_LAUNCHER_SRC" /usr/local/bin/xToolStudio
+sudo install -m 0644 "$SETUP_DIR/xtool-asar-version.pl" /usr/local/bin/xtool-asar-version.pl
 sudo test -x /usr/local/bin/xToolStudio
 if [ -f "$XTOOL_MAPPER_SRC" ]; then
     sudo install -m 0755 "$XTOOL_MAPPER_SRC" /usr/local/bin/xtool-map-windows.py

@@ -19,7 +19,9 @@ Frameless show:true native-crashes under Wine; do not strip the window frame.
 """
 from __future__ import annotations
 
+import math
 import os
+import re
 import signal
 import sys
 import time
@@ -45,7 +47,7 @@ from ctypes.util import find_library
 
 MIN_W, MIN_H = 400, 300
 MAX_W, MAX_H = 1600, 1200
-SKIP_NAMES = ("ime", "angle intermediate", "start page")
+SKIP_NAMES = re.compile(r"\bime\b|angle intermediate")
 KEEP_NAMES = (
     "please select",
     "country or region",
@@ -61,7 +63,6 @@ IsViewable = 2
 ClientMessage = 33
 PropModeReplace = 0
 XA_STRING = 31
-StructureNotifyMask = 1 << 17
 SubstructureNotifyMask = 1 << 20
 SubstructureRedirectMask = 1 << 19
 RootEventMask = SubstructureNotifyMask | SubstructureRedirectMask
@@ -182,8 +183,6 @@ def _load_x11():
     lib.XChangeProperty.restype = c_int
     lib.XSendEvent.argtypes = [c_void_p, c_ulong, c_int, c_long, c_void_p]
     lib.XSendEvent.restype = c_int
-    lib.XSelectInput.argtypes = [c_void_p, c_ulong, c_long]
-    lib.XSelectInput.restype = c_int
     lib.XCreateSimpleWindow.argtypes = [
         c_void_p,
         c_ulong,
@@ -285,7 +284,7 @@ def is_start_page(name):
 
 def is_first_run_dialog(name, cls, attrs):
     blob = f"{name} {cls}".lower()
-    if any(skip in blob for skip in SKIP_NAMES):
+    if SKIP_NAMES.search(blob) or is_start_page(name):
         return False
     if attrs.width < MIN_W or attrs.height < MIN_H:
         return False
@@ -296,13 +295,11 @@ def is_first_run_dialog(name, cls, attrs):
 
 def should_undecorate(name, cls, attrs):
     blob = f"{name} {cls}".lower()
-    if any(skip in blob for skip in SKIP_NAMES) and "start page" not in blob:
+    if SKIP_NAMES.search(blob):
         return False
     if is_start_page(name) or is_first_run_dialog(name, cls, attrs):
         return True
     if attrs.width < MIN_W or attrs.height < MIN_H:
-        return False
-    if "ime" in blob or "angle intermediate" in blob:
         return False
     return "xtool studio" in blob
 
@@ -354,7 +351,7 @@ def set_client_machine(lib, dpy, win, atom, hostname):
 
 
 def set_normal_state(lib, dpy, win, wm_state_atom):
-    data = (c_uint * 2)(NormalState, 0)
+    data = (c_long * 2)(NormalState, 0)
     lib.XChangeProperty(
         dpy, win, wm_state_atom, wm_state_atom, 32, PropModeReplace, data, 2
     )
@@ -399,11 +396,8 @@ def maybe_grow_window(lib, dpy, win, name, attrs, grown):
     return True
 
 
-def reveal_window(lib, dpy, win, atoms, hostname, selected):
+def reveal_window(lib, dpy, win, atoms, hostname):
     root = lib.XDefaultRootWindow(dpy)
-    if win not in selected:
-        lib.XSelectInput(dpy, win, StructureNotifyMask)
-        selected.add(win)
     set_client_machine(lib, dpy, win, atoms["WM_CLIENT_MACHINE"], hostname)
     lib.XMapRaised(dpy, win)
     set_normal_state(lib, dpy, win, atoms["WM_STATE"])
@@ -424,7 +418,6 @@ def map_candidates(
     atoms,
     hostname,
     seen,
-    selected,
     remap_counts,
     retitled=None,
     grown=None,
@@ -470,13 +463,13 @@ def map_candidates(
             set_client_machine(lib, dpy, win, atoms["WM_CLIENT_MACHINE"], hostname)
             retitled.add(win)
             tuned = True
-        if maybe_grow_window(lib, dpy, win, name, attrs, grown):
+        if gnome and maybe_grow_window(lib, dpy, win, name, attrs, grown):
             tuned = True
         if attrs.map_state == IsViewable:
             seen[win] = "viewable"
             continue
         was = seen.get(win)
-        reveal_window(lib, dpy, win, atoms, hostname, selected)
+        reveal_window(lib, dpy, win, atoms, hostname)
         info = (win, name, attrs)
         if was == "viewable":
             remapped.append(info)
@@ -530,12 +523,19 @@ def main():
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
-    timeout = float(os.environ.get("XTOOL_MAP_TIMEOUT", "0"))
-    interval = float(os.environ.get("XTOOL_MAP_INTERVAL", "0.15"))
     display_name = os.environ.get("DISPLAY")
     if not display_name:
         print("xtool-map-windows: DISPLAY is not set; skipping", flush=True)
         return 0
+
+    try:
+        timeout = float(os.environ.get("XTOOL_MAP_TIMEOUT", "0"))
+        interval = float(os.environ.get("XTOOL_MAP_INTERVAL", "0.15"))
+        if not (math.isfinite(timeout) and timeout >= 0 and math.isfinite(interval) and interval > 0):
+            raise ValueError
+    except ValueError:
+        print("xtool-map-windows: set a nonnegative timeout and positive interval", file=sys.stderr)
+        return 1
 
     try:
         lib = _load_x11()
@@ -556,16 +556,15 @@ def main():
         f"host={hostname!r} display={display_name} gnome_family={gnome}",
         flush=True,
     )
-    deadline = time.time() + timeout if timeout > 0 else None
+    deadline = time.monotonic() + timeout if timeout > 0 else None
     seen = {}
-    selected = set()
     remap_counts = {}
     retitled = set()
     grown = set()
     undecorated = set()
     unpinned = set()
     while _running:
-        if deadline is not None and time.time() >= deadline:
+        if deadline is not None and time.monotonic() >= deadline:
             break
         newly, remapped = map_candidates(
             lib,
@@ -573,7 +572,6 @@ def main():
             atoms,
             hostname,
             seen,
-            selected,
             remap_counts,
             retitled,
             grown,
@@ -598,6 +596,7 @@ def main():
                     flush=True,
                 )
         time.sleep(interval)
+    lib.XCloseDisplay(dpy)
     return 0
 
 
@@ -612,6 +611,9 @@ def selftest():
     )
     assert is_first_run_dialog(
         "Join xTool's Improvement Plan", "xtool studio.exe", Fake(1000, 600)
+    )
+    assert is_first_run_dialog(
+        "Please select your time zone, country or region", "xtool studio.exe", Fake(712, 453)
     )
     assert not is_first_run_dialog("xTool Studio", "xtool studio.exe", Fake(712, 446))
     assert not is_first_run_dialog("Start Page - xTool Studio", "xtool studio.exe", Fake(800, 600))
@@ -679,9 +681,8 @@ def selftest():
     hostname = host_machine_name()
     atoms = _atoms(lib, dpy)
     seen = {}
-    selected = set()
     remap_counts = {}
-    newly, remapped = map_candidates(lib, dpy, atoms, hostname, seen, selected, remap_counts)
+    newly, remapped = map_candidates(lib, dpy, atoms, hostname, seen, remap_counts)
     if not any(item[0] == win for item in newly) or remapped:
         lib.XDestroyWindow(dpy, win)
         lib.XCloseDisplay(dpy)
@@ -691,7 +692,7 @@ def selftest():
     lib.XUnmapWindow(dpy, win)
     lib.XSync(dpy, 0)
     seen[win] = "viewable"
-    newly, remapped = map_candidates(lib, dpy, atoms, hostname, seen, selected, remap_counts)
+    newly, remapped = map_candidates(lib, dpy, atoms, hostname, seen, remap_counts)
     ok = any(item[0] == win for item in remapped)
     lib.XDestroyWindow(dpy, win)
     lib.XSync(dpy, 0)

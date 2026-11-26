@@ -19,14 +19,16 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_OS="$(uname -s)"
 LOG_DIR="$HOME/.cache/xtool-studio-cachy-box"
-SETUP_DIR="$LOG_DIR"
+SETUP_DIR=""
 LOG_FILE="$LOG_DIR/install.log"
+CUSTOM_LOG_FILE=false
 LAST_STEP_FILE="$LOG_DIR/last_failed_step"
 CONTAINER_SETUP_SRC="$SCRIPT_DIR/scripts/container-setup.sh"
 FREEBSD_SETUP_SRC="$SCRIPT_DIR/scripts/install-freebsd.sh"
 PAYLOAD_SRC="$SCRIPT_DIR/scripts/install-payload.sh"
 LAUNCHER_SRC="$SCRIPT_DIR/scripts/xtool-studio-launcher.sh"
 MAPPER_SRC="$SCRIPT_DIR/scripts/xtool-map-windows.py"
+ASAR_VERSION_SRC="$SCRIPT_DIR/scripts/xtool-asar-version.pl"
 
 log(){
     local level="$1" timestamp
@@ -204,7 +206,7 @@ while [[ "$#" -gt 0 ]]; do
         --image-source)
             img_choice="$2"; shift 2 ;;
         --log-file)
-            LOG_FILE="$2"; shift 2 ;;
+            LOG_FILE="$2"; CUSTOM_LOG_FILE=true; shift 2 ;;
         --help|-h)
             usage; exit 0 ;;
         *) usage_error "Unknown option '$1'." ;;
@@ -220,8 +222,9 @@ fi
 [[ -z "$img_choice" || "$img_choice" =~ ^[1-2]$ ]] || usage_error "--image-source needs 1 or 2."
 
 if [ "$UNINSTALL" = true ]; then
+    [ "$PRECHECK" = false ] || usage_error "Use --check for installation or --uninstall for removal."
     uninstall_args=(--container-name "$CONTAINER_NAME")
-    [ "$LOG_FILE" = "$LOG_DIR/install.log" ] || uninstall_args+=(--log-file "$LOG_FILE")
+    [ "$CUSTOM_LOG_FILE" = false ] || uninstall_args+=(--log-file "$LOG_FILE")
     [ "$NON_INTERACTIVE" = false ] || uninstall_args+=(--yes)
     [ "$DRY_RUN" = false ] || uninstall_args+=(--dry-run)
     exec bash "$SCRIPT_DIR/uninstall.sh" "${uninstall_args[@]}"
@@ -256,6 +259,16 @@ case "$HOST_OS" in
     Linux|FreeBSD) ;;
     *) fail "Unsupported host OS: $HOST_OS. Linux (Distrobox + Wine) and FreeBSD (native Wine) are supported." ;;
 esac
+case "$(uname -m)" in
+    x86_64|amd64) ;;
+    *) fail 'xTool Studio LinuxBox requires an x86-64 host.' ;;
+esac
+
+cleanup_setup(){
+    if [ -n "$SETUP_DIR" ]; then
+        rm -rf -- "$SETUP_DIR"
+    fi
+}
 
 detect_gpu(){
     detected_gpu="none"
@@ -332,7 +345,7 @@ verify_container_setup(){
 }
 
 container_exists(){
-    distrobox list --no-color | awk -F '|' -v name="$CONTAINER_NAME" '
+    awk -F '|' -v name="$CONTAINER_NAME" '
         { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2) }
         $2 == name { found = 1 }
         END { exit !found }
@@ -353,11 +366,9 @@ write_setup_env(){
 
 prepare_setup(){
     local setup_script="$1"
-    if [ ! -f "$setup_script" ] || [ ! -f "$LAUNCHER_SRC" ] || [ ! -f "$PAYLOAD_SRC" ] || [ ! -f "$MAPPER_SRC" ]; then
-        fail "Setup files are missing. Download and extract a fresh copy of the release."
-    fi
-
-    cp -f "$setup_script" "$LAUNCHER_SRC" "$PAYLOAD_SRC" "$MAPPER_SRC" "$SETUP_DIR/" &&
+    SETUP_DIR="$(mktemp -d "$LOG_DIR/setup.XXXXXX")" || return 1
+    trap cleanup_setup EXIT
+    cp -f "$setup_script" "$LAUNCHER_SRC" "$PAYLOAD_SRC" "$MAPPER_SRC" "$ASAR_VERSION_SRC" "$SETUP_DIR/" &&
     write_setup_env
 }
 
@@ -456,7 +467,7 @@ if [ "$HOST_OS" = "FreeBSD" ]; then
         exit 0
     fi
     log "INFO" "Installing xTool Studio with native Wine. Setup log: $LOG_FILE"
-    prepare_setup "$FREEBSD_SETUP_SRC" || fail "Could not prepare the FreeBSD setup files in $SETUP_DIR."
+    prepare_setup "$FREEBSD_SETUP_SRC" || fail "Could not prepare the FreeBSD setup files in $LOG_DIR."
     bash "$SETUP_DIR/install-freebsd.sh" 2>&1 | tee -a "$LOG_FILE"
     freebsd_rc=${PIPESTATUS[0]:-0}
     if [ "$freebsd_rc" -ne 0 ]; then
@@ -468,6 +479,7 @@ if [ "$HOST_OS" = "FreeBSD" ]; then
     echo -e "${GREEN}Setup complete.${NC}"
     printf 'Open xTool Studio from your app menu or run "%s/.local/bin/xToolStudio".\n' "$HOME"
     printf 'Desktop launch log: %s/launch.log\n' "$LOG_DIR"
+    rm -f -- "$LAST_STEP_FILE"
     exit 0
 fi
 
@@ -490,6 +502,7 @@ fi
 LAST_STEP="start"
 if [ "$DRY_RUN" = false ]; then
     log "INFO" "Installing xTool Studio in '$CONTAINER_NAME'. Setup log: $LOG_FILE"
+    prepare_setup "$CONTAINER_SETUP_SRC" || fail "Could not prepare the container setup files in $LOG_DIR."
 fi
 
 # --- Step 3: Installation Loop with DNS Retry ---
@@ -543,10 +556,14 @@ while [ "$SUCCESS" = false ]; do
 
     if [ "$DRY_RUN" = true ]; then
         log "INFO" "DRY RUN: would replace the '$CONTAINER_NAME' container if it exists."
-    elif container_exists; then
-        LAST_STEP="container:remove"
-        log "INFO" "Replacing the existing '$CONTAINER_NAME' container. Files in your home directory are kept."
-        run_logged distrobox rm -f "$CONTAINER_NAME" || fail "Could not remove '$CONTAINER_NAME'. See $LOG_FILE for details."
+    else
+        LAST_STEP="container:list"
+        containers="$(distrobox list --no-color 2>>"$LOG_FILE")" || fail "Could not list Distrobox containers. See $LOG_FILE for details."
+        if container_exists <<< "$containers"; then
+            LAST_STEP="container:remove"
+            log "INFO" "Replacing the existing '$CONTAINER_NAME' container. Files in your home directory are kept."
+            run_logged distrobox rm -f "$CONTAINER_NAME" || fail "Could not remove '$CONTAINER_NAME'. See $LOG_FILE for details."
+        fi
     fi
 
     echo -e "${BLUE}Creating Distrobox container...${NC}"
@@ -566,7 +583,6 @@ while [ "$SUCCESS" = false ]; do
         log "INFO" "DRY RUN: would install Wine and xTool Studio, then add xTool Studio to your app menu."
         exit 0
     else
-        prepare_setup "$CONTAINER_SETUP_SRC" || fail "Could not prepare the container setup files in $SETUP_DIR."
         enter_container /bin/bash "$SETUP_DIR/container-setup.sh"
         install_rc=$?
         if [ $install_rc -eq 0 ] && verify_container_setup; then
@@ -595,10 +611,11 @@ desktop_file="$desktop_dir/$CONTAINER_NAME-xToolStudio.desktop"
 if [ ! -f "$desktop_file" ]; then
     fail "Distrobox did not create $desktop_file. See $LOG_FILE for details."
 fi
-sed -i 's|/run/host||' "$desktop_file" || fail "Could not update $desktop_file."
+sed -i 's|^Exec=/run/host/|Exec=/|' "$desktop_file" || fail "Could not update $desktop_file."
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$desktop_dir" || log "WARN" "Could not refresh the desktop menu database."
 fi
+rm -f -- "$LAST_STEP_FILE"
 echo -e "${GREEN}Setup complete.${NC}"
 echo "Open xTool Studio from your app menu."
 printf 'For terminal output, run distrobox enter --no-workdir %s -- /usr/local/bin/xToolStudio\n' "$CONTAINER_NAME"

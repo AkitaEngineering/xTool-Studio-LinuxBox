@@ -106,9 +106,6 @@ elif [ "$HOST_OS" = "Linux" ]; then
             END { exit !found }
         '; then
             log "Removing the xTool Studio desktop export and '$CONTAINER_NAME' container."
-            if ! run_logged distrobox enter --no-workdir "$CONTAINER_NAME" -- distrobox-export --app xToolStudio --delete; then
-                log 'Distrobox could not remove the export. The uninstaller will remove its desktop entry below.'
-            fi
             if ! run_logged distrobox rm -f "$CONTAINER_NAME"; then
                 log "Could not remove '$CONTAINER_NAME'. See $LOG_FILE for details."
                 exit 1
@@ -133,14 +130,14 @@ elif [ "$HOST_OS" = "Linux" ]; then
     fi
     desktop_files=("$DESKTOP_DIR/$CONTAINER_NAME-xToolStudio.desktop")
 else
-    desktop_files=("$DESKTOP_DIR/xToolStudio.desktop" "$HOME/.local/bin/xToolStudio" "$HOME/.local/bin/xtool-map-windows.py")
+    desktop_files=("$DESKTOP_DIR/xToolStudio.desktop" "$HOME/.local/bin"/{xToolStudio,xtool-map-windows.py,xtool-asar-version.pl})
 fi
 
 if [ "$DRY_RUN" = true ]; then
     log 'Would remove the launcher files and cached setup scripts.'
 else
     log 'Removing launcher files and cached setup scripts.'
-    rm -f -- "${desktop_files[@]}" "$LOG_DIR"/{container-setup.env,container-setup.sh,install-freebsd.sh,install-payload.sh,xtool-studio-launcher.sh,xtool-map-windows.py} || {
+    rm -f -- "${desktop_files[@]}" "$LOG_DIR"/{container-setup.env,container-setup.sh,install-freebsd.sh,install-payload.sh,xtool-studio-launcher.sh,xtool-map-windows.py,xtool-asar-version.pl} || {
         log 'Some launcher or setup files could not be removed.'
         exit 1
     }

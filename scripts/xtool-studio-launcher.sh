@@ -85,11 +85,6 @@ find_installed_exe() {
 					return 0
 				fi
 			done
-			find "$dir" -type f -iname "*.exe" \
-				! -iname "xTool Studio.exe" ! -iname "xTool-Studio.exe" ! -iname "xToolStudio.exe" \
-				! -iname "elevate.exe" ! -iname "*setup*.exe" ! -iname "*unins*.exe" \
-				! -iname "*uninstall*.exe" ! -iname "*update*.exe" | sort | head -n 1
-			return 0
 		fi
 	done
 	find "$PREFIX_DIR/drive_c" -type f \
@@ -203,28 +198,17 @@ printf 'Wine: %s\n' "$wine_ver"
 # 1.11 opens that window on its own. The same ANGLE flags make its GPU process
 # restart and the dialog never maps. 1.6.6 still exits if Chromium --disable-gpu
 # arguments are supplied.
-is_xtool_1911=0
-is_xtool_111=0
 APP_ASAR="$(dirname "$APP_EXE")/resources/app.asar"
-if [ -f "$APP_ASAR" ] && grep -F -- 'show:!1,frame:!1,movable:!0,webPreferences:{nodeIntegration:!0,contextIsolation:!1,webSecurity:!1}' "$APP_ASAR" >/dev/null 2>&1; then
-	is_xtool_1911=1
-elif [ -f "$APP_ASAR" ] && grep -F -- 'startup-dialog-preload.cjs' "$APP_ASAR" >/dev/null 2>&1; then
-	is_xtool_111=1
-fi
-if [ "$is_xtool_1911" = "1" ] || [ "$is_xtool_111" = "1" ]; then
-	# Glob: wine- + one digit + literal '.'  (wine-9.0 matches, wine-11.0 does not)
-	case "$wine_ver" in
-		wine-[0-9].*|wine-9.*)
-			echo 'This xTool Studio build cannot open the country selection window with Wine 9.'
-			echo 'Run ./install.sh to update Wine. Check the Wine version in launch.log afterward.'
-			exit 3
-			;;
-	esac
-fi
-if [ "$is_xtool_111" = "1" ]; then
-	echo 'xTool Studio 1.11: opening its own first-run windows. The 1.9.11 graphics overrides are not applied.'
-fi
-if [ "$is_xtool_1911" = "1" ]; then
+studio_version="$(perl "$SCRIPT_DIR/xtool-asar-version.pl" "$APP_ASAR" 2>/dev/null || true)"
+printf 'xTool Studio version: %s\n' "${studio_version:-unknown}"
+case "$studio_version:$wine_ver" in
+	1.9.11:wine-[0-9].*|1.11:wine-[0-9].*|1.11.*:wine-[0-9].*)
+		echo 'This xTool Studio build requires Wine 10 or newer to open the country selection window.'
+		echo 'Run ./install.sh to update Wine. Check the Wine version in launch.log afterward.'
+		exit 3
+		;;
+esac
+if [ "$studio_version" = "1.9.11" ]; then
 	if [ "$force_software_rendering" = "1" ]; then
 		echo 'WARN: software rendering often cannot paint xTool Studio 1.9.11 first-run windows; the Nvidia/AMD/Intel GPU install option is recommended'
 	fi
@@ -304,9 +288,14 @@ stop_first_run_mapper() {
 	fi
 }
 
-if [ "$is_xtool_1911" = "1" ] || [ "$is_xtool_111" = "1" ]; then
-	start_first_run_mapper
-fi
+case "$studio_version" in
+	1.9.11|1.11|1.11.*)
+		trap stop_first_run_mapper EXIT
+		trap 'exit 130' INT
+		trap 'exit 143' TERM
+		start_first_run_mapper
+		;;
+esac
 
 # Missing stdin is redirected so Electron/Node does not crash with EBADF.
 # Keep this process in the Distrobox enter session until Wine exits so
@@ -316,4 +305,3 @@ if [ ! -t 0 ]; then
 fi
 env WINEPREFIX="$PREFIX_DIR" wine start /unix "$APP_EXE" "$@"
 env WINEPREFIX="$PREFIX_DIR" wineserver -w
-stop_first_run_mapper

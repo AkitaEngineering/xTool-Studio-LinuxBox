@@ -24,6 +24,10 @@ xtool_count_literal() {
     { LC_ALL=C grep -aoF -- "$needle" "$file" 2>/dev/null || true; } | awk 'END { print NR }'
 }
 
+xtool_asar_version() {
+    perl "$(dirname -- "${BASH_SOURCE[0]}")/xtool-asar-version.pl" "$1"
+}
+
 # Same-length in-place replacement so the asar header offsets stay valid.
 xtool_replace_same_length() {
     local file="$1"
@@ -145,6 +149,15 @@ xtool_patch_electron_startup() {
         return 1
     fi
 
+    if ! command -v perl >/dev/null 2>&1; then
+        echo 'Perl is required to apply the xTool Electron startup compatibility patch.' >&2
+        return 1
+    fi
+    if [ "$(xtool_asar_version "$app_asar" 2>/dev/null)" != "1.9.11" ]; then
+        echo 'WARN: This xTool Studio build does not match the supported 1.9.11 window patch. Leaving app.asar unchanged.' >&2
+        return 0
+    fi
+
     isolation_old_count="$(xtool_count_literal "$isolation_old" "$app_asar")"
     gate_hidden_count="$(xtool_count_literal "$gate_hidden" "$app_asar")"
     gate_shown_count="$(xtool_count_literal "$gate_shown" "$app_asar")"
@@ -160,9 +173,7 @@ xtool_patch_electron_startup() {
     improve_old_count="$(xtool_count_literal "$improve_old" "$app_asar")"
     wine_major="$(xtool_wine_major)"
 
-    # 1.11 and later embed an asar integrity hash. The old Start Page
-    # transparency string still occurs there, but the 1.9.11 window
-    # signatures do not. Rewriting that string makes Electron quit.
+    # The supported version still needs a recognized window signature.
     if [ "$isolation_old_count" -eq 0 ] && [ "$gate_hidden_count" -eq 0 ] && \
        [ "$gate_shown_count" -eq 0 ] && [ "$gate_shown_frameless_count" -eq 0 ] && \
        [ "$gate_framed_count" -eq 0 ] && [ "$launch_frame_old_count" -eq 0 ] && \
@@ -200,14 +211,9 @@ xtool_patch_electron_startup() {
         fi
     fi
 
-    if ! command -v perl >/dev/null 2>&1; then
-        echo 'Perl is required to apply the xTool Electron startup compatibility patch.' >&2
-        return 1
-    fi
-
-    temp_asar="$app_asar.startup-visibility.tmp"
-    rm -f "$temp_asar"
-    if ! cp -f "$app_asar" "$temp_asar"; then
+    temp_asar="$(mktemp "$app_asar.startup-visibility.XXXXXX")" || return 1
+    if ! cp -p "$app_asar" "$temp_asar"; then
+        rm -f "$temp_asar"
         echo 'Could not create a temporary copy of app.asar for patching.' >&2
         return 1
     fi
@@ -315,10 +321,10 @@ xtool_upgrade_prefix() {
     else
         echo "Updating existing Wine prefix for $ver"
     fi
-    mkdir -p "$prefix_dir"
+    mkdir -p "$prefix_dir" || return 1
     # Electron does not need .NET or Gecko. Keep wineboot from prompting.
-    case ":${WINEDLLOVERRIDES-}:" in
-        *:mscoree=*) ;;
+    case ";${WINEDLLOVERRIDES-};" in
+        *';mscoree='*) ;;
         *)
             if [ -n "${WINEDLLOVERRIDES-}" ]; then
                 export WINEDLLOVERRIDES="$WINEDLLOVERRIDES;mscoree=;mshtml="
@@ -327,17 +333,14 @@ xtool_upgrade_prefix() {
             fi
             ;;
     esac
-    if command -v wineboot >/dev/null 2>&1; then
-        WINEPREFIX="$prefix_dir" WINEDEBUG=-all wineboot -u || {
-            echo "WARN: wineboot -u failed for $prefix_dir" >&2
-        }
-    else
-        WINEPREFIX="$prefix_dir" WINEDEBUG=-all wine wineboot -u || {
-            echo "WARN: wineboot -u failed for $prefix_dir" >&2
-        }
+    local wineboot_cmd=(wineboot)
+    if ! command -v wineboot >/dev/null 2>&1; then
+        wineboot_cmd=(wine wineboot)
     fi
-    WINEPREFIX="$prefix_dir" wineserver -w >/dev/null 2>&1 || true
-    return 0
+    if ! WINEPREFIX="$prefix_dir" WINEDEBUG=-all "${wineboot_cmd[@]}" -u; then
+        echo "Could not initialize Wine prefix at $prefix_dir." >&2
+        return 1
+    fi
 }
 
 # Wine 9 GPU/crash caches keep Chromium on the spoofed HD 5600 path after
@@ -371,10 +374,34 @@ xtool_clear_electron_gpu_caches() {
     fi
 }
 
-xtool_install_payload() {
-    local app_home installer_dir payload_dir prefix_dir
-    local url_record extracted_url_record installer_path download_path
-    local user_name app_install_dir nsis_plugin_dir archive extractor
+xtool_download_installer() {
+    echo 'Downloading xTool Studio Windows installer (with retries)'
+    if ! curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 1200 \
+        --progress-bar -o "$1" -- "$XTOOL_URL" || [ ! -s "$1" ]; then
+        echo 'Could not download xTool Studio. Check your connection or pass a current Windows installer URL with --url.' >&2
+        return 1
+    fi
+}
+
+xtool_extract_payload() {
+    local extractor="$1" installer="$2" staging="$3" archive
+
+    "$extractor" x -y "$installer" -o"$staging/nsis" >/dev/null || return 1
+    archive="$(find "$staging/nsis" -type f -name 'app-64.7z' -print -quit)" || return 1
+    if [ -z "$archive" ]; then
+        echo 'The installer did not contain app-64.7z. Check that the URL points to the x64 Windows installer.' >&2
+        return 1
+    fi
+    "$extractor" x -y "$archive" -o"$staging/app" >/dev/null || return 1
+    if [ ! -s "$staging/app/xTool Studio.exe" ] || [ ! -s "$staging/app/resources/app.asar" ]; then
+        echo 'The extracted payload is missing the xTool Studio executable or Electron archive.' >&2
+        return 1
+    fi
+}
+
+xtool_install_payload() (
+    local app_home installer_dir prefix_dir url_record extracted_url_record
+    local installer_path download_path user_name app_install_dir staging_dir extractor installed_url
 
     : "${XTOOL_URL:?XTOOL_URL is required}"
     XTOOL_FORCE_SOFTWARE_RENDERING="${XTOOL_FORCE_SOFTWARE_RENDERING:-1}"
@@ -386,66 +413,64 @@ xtool_install_payload() {
 
     app_home="$HOME/.local/share/xtool-studio"
     installer_dir="$app_home/downloads"
-    payload_dir="$app_home/payload"
     prefix_dir="$app_home/prefix"
     url_record="$app_home/last-download-url"
     extracted_url_record="$app_home/last-extracted-url"
     installer_path="$installer_dir/xTool-Studio-setup.exe"
     user_name="${USER:-$(id -un 2>/dev/null || echo user)}"
     app_install_dir="$prefix_dir/drive_c/users/$user_name/AppData/Local/Programs/xTool Studio"
-    nsis_plugin_dir='$PLUGINSDIR'
-
-    mkdir -p "$installer_dir" "$app_home"
-    printf '%s\n' "$XTOOL_FORCE_SOFTWARE_RENDERING" > "$app_home/force-software-rendering"
-    if command -v wine >/dev/null 2>&1; then
-        wine --version >"$app_home/wine-version" 2>/dev/null || true
-    fi
-
-    if [ ! -f "$installer_path" ] || [ ! -f "$url_record" ] || [ "$(cat "$url_record")" != "$XTOOL_URL" ]; then
-        echo 'Downloading xTool Studio Windows installer (with retries)'
-        download_path="$(mktemp "$installer_dir/.xtool-download.XXXXXX")" || return 1
-        if ! curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 1200 \
-            --progress-bar -o "$download_path" -- "$XTOOL_URL"; then
-            rm -f "$download_path"
-            echo 'Could not download xTool Studio. Check your connection or pass a current Windows installer URL with --url.' >&2
-            return 1
+    mkdir -p "$installer_dir" || return 1
+    staging_dir="$(mktemp -d "$app_home/.install.XXXXXX")" || return 1
+    cleanup_staging() {
+        if [ -d "$staging_dir/previous-app" ] && [ ! -e "$app_install_dir" ]; then
+            if ! mv -- "$staging_dir/previous-app" "$app_install_dir"; then
+                echo "Could not restore the previous xTool Studio installation from $staging_dir/previous-app." >&2
+                return 1
+            fi
         fi
-        mv -f "$download_path" "$installer_path"
-        printf '%s\n' "$XTOOL_URL" > "$url_record"
+        rm -rf -- "$staging_dir"
+    }
+    trap cleanup_staging EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    download_path="$installer_path"
+    if [ ! -s "$installer_path" ] || [ "$(cat "$url_record" 2>/dev/null)" != "$XTOOL_URL" ]; then
+        download_path="$staging_dir/installer.exe"
+        xtool_download_installer "$download_path" || return 1
     fi
 
-    if ! xtool_upgrade_prefix "$prefix_dir"; then
-        return 1
-    fi
-
-    if [ ! -f "$app_install_dir/xTool Studio.exe" ] || [ ! -f "$extracted_url_record" ] || [ "$(cat "$extracted_url_record")" != "$XTOOL_URL" ]; then
+    installed_url="$(cat "$app_install_dir/.linuxbox-source-url" 2>/dev/null || cat "$extracted_url_record" 2>/dev/null || true)"
+    if [ ! -s "$app_install_dir/xTool Studio.exe" ] || [ ! -s "$app_install_dir/resources/app.asar" ] || \
+       [ "$installed_url" != "$XTOOL_URL" ]; then
         echo 'Extracting xTool Studio application payload'
-        rm -rf "$payload_dir" "$app_install_dir"
-        mkdir -p "$payload_dir" "$app_install_dir"
-        "$extractor" x -y "$installer_path" -o"$payload_dir" >/dev/null
-
-        archive="$payload_dir/$nsis_plugin_dir/app-64.7z"
-        if [ ! -f "$archive" ]; then
-            archive="$(find "$payload_dir" -type f -name 'app-64.7z' -print | head -n 1)"
-        fi
-        if [ -z "$archive" ] || [ ! -f "$archive" ]; then
-            echo "Could not extract xTool Studio. Check that the URL points to the x64 Windows installer." >&2
-            echo "The expected app-64.7z archive was missing. Extracted files follow." >&2
-            find "$payload_dir" -maxdepth 3 -print >&2 || true
-            return 1
-        fi
-
-        "$extractor" x -y "$archive" -o"$app_install_dir" >/dev/null
-        printf '%s\n' "$XTOOL_URL" > "$extracted_url_record"
+        xtool_extract_payload "$extractor" "$download_path" "$staging_dir" || return 1
+        xtool_patch_electron_startup "$staging_dir/app/resources/app.asar" || return 1
+        printf '%s\n' "$XTOOL_URL" > "$staging_dir/app/.linuxbox-source-url" || return 1
+    else
+        xtool_patch_electron_startup "$app_install_dir/resources/app.asar" || return 1
     fi
 
-    # xTool 1.9.11 first-run country/privacy/plan windows start hidden and
-    # frameless. Wine 10+ gets a normal frame plus show:true. Wine 9 keeps
-    # them hidden+framed because show() native-crashes. Keep contextIsolation
-    # off so country-select.html can use window.require('electron').
-    xtool_patch_electron_startup "$app_install_dir/resources/app.asar"
-    if [ -f "$app_install_dir/resources/app.asar" ] && \
-       [ "$(xtool_count_literal 'createCountrySelectWindow' "$app_install_dir/resources/app.asar")" -gt 0 ]; then
+    xtool_upgrade_prefix "$prefix_dir" || return 1
+
+    if [ "$download_path" != "$installer_path" ]; then
+        printf '%s\n' "$XTOOL_URL" > "$staging_dir/download-url" &&
+            rm -f -- "$url_record" &&
+            mv -f -- "$download_path" "$installer_path" &&
+            mv -f -- "$staging_dir/download-url" "$url_record" || return 1
+    fi
+    if [ -d "$staging_dir/app" ]; then
+        mkdir -p -- "${app_install_dir%/*}" || return 1
+        if [ -e "$app_install_dir" ]; then
+            mv -- "$app_install_dir" "$staging_dir/previous-app" || return 1
+        fi
+        mv -- "$staging_dir/app" "$app_install_dir" || return 1
+        printf '%s\n' "$XTOOL_URL" > "$extracted_url_record" || return 1
+    fi
+
+    printf '%s\n' "$XTOOL_FORCE_SOFTWARE_RENDERING" > "$app_home/force-software-rendering" || return 1
+    wine --version >"$app_home/wine-version" 2>/dev/null || true
+    if [ "$(xtool_asar_version "$app_install_dir/resources/app.asar" 2>/dev/null)" = "1.9.11" ]; then
         xtool_clear_electron_gpu_caches "$prefix_dir" "$user_name"
     fi
-}
+)

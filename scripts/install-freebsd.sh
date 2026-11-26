@@ -4,10 +4,9 @@
 # Portions copyright (c) 2026 Sascha Schüller, MIT. See LICENSES/MIT.txt.
 set -euo pipefail
 
-SETUP_DIR="${XTOOL_SETUP_DIR:-$HOME/.cache/xtool-studio-cachy-box}"
+SETUP_DIR="${XTOOL_SETUP_DIR:-$(dirname -- "${BASH_SOURCE[0]}")}"
 ENV_FILE="${XTOOL_SETUP_ENV:-$SETUP_DIR/container-setup.env}"
 PAYLOAD_LIB="${XTOOL_PAYLOAD_LIB:-$SETUP_DIR/install-payload.sh}"
-DRY_RUN="${XTOOL_DRY_RUN:-false}"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "Missing setup environment file: $ENV_FILE" >&2
@@ -16,6 +15,7 @@ fi
 
 # shellcheck disable=SC1090
 source "$ENV_FILE"
+DRY_RUN="${XTOOL_DRY_RUN:-false}"
 
 : "${XTOOL_URL:?XTOOL_URL is required}"
 : "${XTOOL_LAUNCHER_SRC:?XTOOL_LAUNCHER_SRC is required}"
@@ -73,19 +73,22 @@ bin_dir="$HOME/.local/bin"
 app_dir="$HOME/.local/share/applications"
 mkdir -p "$bin_dir" "$app_dir"
 install -m 0755 "$XTOOL_LAUNCHER_SRC" "$bin_dir/xToolStudio"
+install -m 0644 "$SETUP_DIR/xtool-asar-version.pl" "$bin_dir/xtool-asar-version.pl"
 if [ -f "$XTOOL_MAPPER_SRC" ]; then
     install -m 0755 "$XTOOL_MAPPER_SRC" "$bin_dir/xtool-map-windows.py"
 fi
 
 desktop_file="$app_dir/xToolStudio.desktop"
+exec_path="$(printf '%s' "$bin_dir/xToolStudio" | sed 's/[\\"`$]/\\&/g; s/\\/\\\\/g; s/%/%%/g')"
+try_exec_path="$(printf '%s' "$bin_dir/xToolStudio" | sed 's/\\/\\\\/g')"
 {
     printf '%s\n' '[Desktop Entry]'
     printf '%s\n' 'Type=Application'
     printf '%s\n' 'Version=1.0'
     printf '%s\n' 'Name=xTool Studio'
     printf '%s\n' 'Comment=Run xTool Studio through native FreeBSD Wine'
-    printf '%s\n' "Exec=$bin_dir/xToolStudio %F"
-    printf '%s\n' "TryExec=$bin_dir/xToolStudio"
+    printf 'Exec="%s" %%F\n' "$exec_path"
+    printf 'TryExec=%s\n' "$try_exec_path"
     printf '%s\n' 'Terminal=false'
     printf '%s\n' 'Categories=Graphics;Utility;'
     printf '%s\n' 'StartupNotify=false'
