@@ -8,7 +8,7 @@ Thanks to the people and places that helped xTool Studio LinuxBox get here.
 
 ## The laser
 
-The [Niagara Falls Rankin Innovation Hub](https://nfinnovationhub.ca/) let me use their xTool laser. The Hub, at 4551 Zimmerman Avenue in Niagara Falls, Ontario, gives local entrepreneurs a place to build.
+The [Niagara Falls Rankin Innovation Hub](https://nfinnovationhub.ca/) let us use their xTool laser. The Hub, at 4551 Zimmerman Avenue in Niagara Falls, Ontario, gives local entrepreneurs a place to build.
 
 ## Niagara Falls
 
