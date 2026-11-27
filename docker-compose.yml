@@ -8,12 +8,12 @@ services:
       context: .
       dockerfile: ${XTOOL_CONTAINERFILE:-containerfile.amd}
     container_name: xtool-studio-compose
+    userns_mode: "keep-id:uid=1001,gid=1001"
     network_mode: host
     privileged: true
     environment:
       - DISPLAY=${DISPLAY}
-      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
-      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}
+      - XAUTHORITY=/tmp/xtool-Xauthority
       - QT_X11_NO_MITSHM=1
       - NO_AT_BRIDGE=1
       - LANG=en_US.UTF-8
@@ -23,9 +23,13 @@ services:
       - XTOOL_FORCE_SOFTWARE_RENDERING=${XTOOL_FORCE_SOFTWARE_RENDERING:-0}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY:-wayland-0}:${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY:-wayland-0}:ro
+      - type: bind
+        source: ${XAUTHORITY:-${HOME}/.Xauthority}
+        target: /tmp/xtool-Xauthority
+        read_only: true
+        bind:
+          create_host_path: false
       - ${HOME}:/home/sliceruser:rw
-      - /dev/dri:/dev/dri:rw
     command:
       - /bin/bash
       - -lc
@@ -57,10 +61,21 @@ services:
         mkdir -p "$$HOME/.local/bin" "$$HOME/.local/share/xtool-studio/downloads"
         XTOOL_URL_FILE="$$HOME/.local/share/xtool-studio/last-download-url"
         XTOOL_INSTALLER_PATH="$$HOME/.local/share/xtool-studio/downloads/xTool-Studio-setup.exe"
-        if [ ! -f "$$XTOOL_INSTALLER_PATH" ] || [ ! -f "$$XTOOL_URL_FILE" ] || [ "$$(cat "$$XTOOL_URL_FILE" 2>/dev/null || true)" != "$$XTOOL_DOWNLOAD_URL" ]; then
-          curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 300 --progress-bar "$$XTOOL_DOWNLOAD_URL" -o "$$XTOOL_INSTALLER_PATH"
+        exec 9>>"$$HOME/.local/share/xtool-studio/.install.lock"
+        perl -MFcntl=:flock -e 'flock(STDIN, LOCK_EX | LOCK_NB) or die "Could not lock xTool Studio data. Another installation may be running ($$!).\n";' <&9
+        XTOOL_DOWNLOAD_TEMP=""
+        trap '[ -z "$$XTOOL_DOWNLOAD_TEMP" ] || rm -f -- "$$XTOOL_DOWNLOAD_TEMP"' EXIT
+        if [ ! -s "$$XTOOL_INSTALLER_PATH" ] || [ ! -f "$$XTOOL_URL_FILE" ] || [ "$$(cat "$$XTOOL_URL_FILE" 2>/dev/null || true)" != "$$XTOOL_DOWNLOAD_URL" ]; then
+          XTOOL_DOWNLOAD_TEMP=$$(mktemp "$$HOME/.local/share/xtool-studio/downloads/.xtool-download.XXXXXX")
+          curl --fail -L --retry 5 --retry-delay 2 --connect-timeout 15 --max-time 1200 --progress-bar -o "$$XTOOL_DOWNLOAD_TEMP" -- "$$XTOOL_DOWNLOAD_URL"
+          [ -s "$$XTOOL_DOWNLOAD_TEMP" ] || { echo 'The xTool Studio download was empty.' >&2; exit 1; }
+          rm -f -- "$$XTOOL_URL_FILE"
+          mv -f -- "$$XTOOL_DOWNLOAD_TEMP" "$$XTOOL_INSTALLER_PATH"
           printf "%s\n" "$$XTOOL_DOWNLOAD_URL" > "$$XTOOL_URL_FILE"
         fi
+        perl -MFcntl=:flock -e 'flock(STDIN, LOCK_UN) or die "Could not unlock xTool Studio data ($$!).\n";' <&9
+        exec 9>&-
+        trap - EXIT
         printf '%s\n' \
           '#!/bin/sh' \
           'set -eu' \
@@ -78,10 +93,10 @@ services:
           '  export GALLIUM_DRIVER="$${GALLIUM_DRIVER:-llvmpipe}"' \
           '  export MESA_LOADER_DRIVER_OVERRIDE="$${MESA_LOADER_DRIVER_OVERRIDE:-llvmpipe}"' \
           'fi' \
-          'APP_EXE=$$(find "$$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
+          'APP_EXE=$$(find "$$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*setup*.exe" ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
           'if [ -z "$$APP_EXE" ]; then' \
           '  wine "$$INSTALLER_PATH"' \
-          '  APP_EXE=$$(find "$$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
+          '  APP_EXE=$$(find "$$PREFIX_DIR/drive_c" -type f \( -iname "xTool Studio*.exe" -o -iname "xTool-Studio*.exe" -o -iname "xToolStudio*.exe" \) ! -iname "*setup*.exe" ! -iname "*unins*.exe" ! -iname "*uninstall*.exe" ! -iname "*update*.exe" 2>/dev/null | sort | head -n 1)' \
           'fi' \
           '[ -n "$$APP_EXE" ] || { echo "xTool Studio executable not found after installer exit." >&2; exit 1; }' \
           'exec wine "$$APP_EXE" "$$@"' \

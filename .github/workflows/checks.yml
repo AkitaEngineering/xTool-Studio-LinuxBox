@@ -24,9 +24,14 @@ jobs:
           sh -n scripts/xtool-studio-launcher.sh
           fish --no-execute install.fish
           fish --no-execute uninstall.fish
+          perl -c scripts/xtool-asar-version.pl
           python3 -c 'import ast, pathlib; ast.parse(pathlib.Path("scripts/xtool-map-windows.py").read_text())'
       - name: Run installer and uninstaller previews
         run: bash tests/cli-smoke.sh
+      - name: Check payload upgrades and launchers
+        run: |
+          python3 tests/runtime-checks.py
+          env -u DISPLAY XTOOL_MAP_SELFTEST=1 python3 scripts/xtool-map-windows.py
       - name: Validate legacy Compose configuration
         env:
           DISPLAY: ':0'

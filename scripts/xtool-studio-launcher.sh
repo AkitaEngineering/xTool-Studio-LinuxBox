@@ -13,7 +13,7 @@ INSTALLER_TEMP_DIR="$PREFIX_DIR/drive_c/users/$USER_NAME/Temp/xTool-Studio"
 RENDER_FLAG_FILE="$APP_HOME/force-software-rendering"
 LAUNCH_LOG_DIR="$HOME/.cache/xtool-studio-cachy-box"
 LAUNCH_LOG="$LAUNCH_LOG_DIR/launch.log"
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 MAPPER_PID=""
 
 # Desktop launchers normally discard stdout/stderr. Preserve it so a failed
@@ -52,17 +52,20 @@ unset SDL_VIDEODRIVER
 
 # xTool Studio is Electron, not .NET. Stop Wine 11 from prompting to
 # download wine-mono / wine-gecko on first wineboot and first launch.
-case ":${WINEDLLOVERRIDES-}:" in
-	*:mscoree=*) ;;
-	*)
-		if [ -n "${WINEDLLOVERRIDES-}" ]; then
-			WINEDLLOVERRIDES="$WINEDLLOVERRIDES;mscoree=;mshtml="
-		else
-			WINEDLLOVERRIDES="mscoree=;mshtml="
-		fi
-		export WINEDLLOVERRIDES
-		;;
-esac
+# Collect names before adding defaults, including grouped and wildcard names.
+configured_dlls="$(
+	printf '%s' "${WINEDLLOVERRIDES-}" |
+		sed 's/=[^;]*//g' |
+		tr ';[:upper:]' ',[:lower:]' |
+		tr -d '*[:space:]'
+)"
+for dll in mscoree mshtml; do
+	case ",$configured_dlls," in
+		*",$dll,"*) ;;
+		*) WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}$dll=" ;;
+	esac
+done
+export WINEDLLOVERRIDES
 
 is_installer_running() {
 	if command -v pgrep >/dev/null 2>&1; then
@@ -141,6 +144,7 @@ elif [ -f "$RENDER_FLAG_FILE" ]; then
 fi
 
 mkdir -p "$APP_HOME" "$INSTALLER_DIR"
+export WINEARCH=win64
 if [ ! -d "$PREFIX_DIR" ]; then
 	WINEPREFIX="$PREFIX_DIR" wineboot -u >/dev/null 2>&1 || true
 fi

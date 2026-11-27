@@ -2,7 +2,7 @@
 
 The [main installer](../README.md#install-and-launch) sets up WineHQ, applies first-run compatibility fixes, and exports an app-menu entry. The Linux-only Compose configuration uses the Ubuntu Wine packages in its containerfile and runs xTool Studio directly in the foreground. xTool Studio 1.9.11 can fail during first run on this older Wine. The configuration uses privileged container access and mounts your home directory read/write. It shares the Wine prefix and download cache used by the main installer.
 
-With Podman, a Compose provider, and a running desktop session, use the following commands from the repository folder.
+With rootless Podman, a Compose provider, and a running X11 or XWayland desktop session, use the following commands from the repository folder. Compose maps your user to the image's UID 1001 so the container can write to your mounted home directory. It mounts the X11 authorization file from `XAUTHORITY`, falling back to `~/.Xauthority`. Set `XAUTHORITY` to your desktop session's cookie file if it uses another location.
 
 ```sh
 podman compose config --quiet

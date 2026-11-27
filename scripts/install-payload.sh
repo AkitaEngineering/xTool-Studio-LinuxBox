@@ -308,7 +308,7 @@ xtool_patch_electron_startup() {
 # Electron 36 runs.
 xtool_upgrade_prefix() {
     local prefix_dir="$1"
-    local ver
+    local ver configured_dlls dll
 
     if ! command -v wine >/dev/null 2>&1 && ! command -v wineboot >/dev/null 2>&1; then
         echo "Wine is not installed; cannot initialize the prefix." >&2
@@ -323,21 +323,25 @@ xtool_upgrade_prefix() {
     fi
     mkdir -p "$prefix_dir" || return 1
     # Electron does not need .NET or Gecko. Keep wineboot from prompting.
-    case ";${WINEDLLOVERRIDES-};" in
-        *';mscoree='*) ;;
-        *)
-            if [ -n "${WINEDLLOVERRIDES-}" ]; then
-                export WINEDLLOVERRIDES="$WINEDLLOVERRIDES;mscoree=;mshtml="
-            else
-                export WINEDLLOVERRIDES="mscoree=;mshtml="
-            fi
-            ;;
-    esac
+    configured_dlls="$(
+        printf '%s' "${WINEDLLOVERRIDES-}" |
+            sed 's/=[^;]*//g' |
+            tr ';[:upper:]' ',[:lower:]' |
+            tr -d '*[:space:]'
+    )"
+    for dll in mscoree mshtml; do
+        case ",$configured_dlls," in
+            *",$dll,"*) ;;
+            *) WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}$dll=" ;;
+        esac
+    done
+    export WINEDLLOVERRIDES
     local wineboot_cmd=(wineboot)
     if ! command -v wineboot >/dev/null 2>&1; then
         wineboot_cmd=(wine wineboot)
     fi
-    if ! WINEPREFIX="$prefix_dir" WINEDEBUG=-all "${wineboot_cmd[@]}" -u; then
+    # Wine's background server must not retain the payload installation lock.
+    if ! WINEPREFIX="$prefix_dir" WINEARCH=win64 WINEDEBUG=-all "${wineboot_cmd[@]}" -u 9>&-; then
         echo "Could not initialize Wine prefix at $prefix_dir." >&2
         return 1
     fi
@@ -359,7 +363,7 @@ xtool_clear_electron_gpu_caches() {
         for cache in GPUCache ShaderCache GrShaderCache DawnGraphiteCache DawnWebGPUCache Crashpad; do
             if [ -e "$base/$cache" ]; then
                 echo "Clearing stale Electron cache: $base/$cache"
-                rm -rf "$base/$cache"
+                rm -rf "${base:?}/${cache:?}"
                 cleared=1
             fi
         done
@@ -420,6 +424,13 @@ xtool_install_payload() (
     user_name="${USER:-$(id -un 2>/dev/null || echo user)}"
     app_install_dir="$prefix_dir/drive_c/users/$user_name/AppData/Local/Programs/xTool Studio"
     mkdir -p "$installer_dir" || return 1
+    # Hold one lock for the shared prefix and download cache across containers.
+    # Perl uses flock on Linux and FreeBSD. The subshell releases fd 9 on exit.
+    exec 9>>"$app_home/.install.lock" || return 1
+    perl -MFcntl=:flock -e '
+        flock(STDIN, LOCK_EX | LOCK_NB)
+            or die "Could not lock xTool Studio data. Another installation may be running ($!).\n";
+    ' <&9 || return 1
     staging_dir="$(mktemp -d "$app_home/.install.XXXXXX")" || return 1
     cleanup_staging() {
         if [ -d "$staging_dir/previous-app" ] && [ ! -e "$app_install_dir" ]; then
